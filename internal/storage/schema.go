@@ -52,6 +52,13 @@ var migrations = []string{
 		created_at INTEGER NOT NULL,
 		PRIMARY KEY (task_id, seq)
 	);`,
+	// 2: content-addressed tool result cache (RFC §3.3).
+	`CREATE TABLE tool_cache (
+		key        BLOB    PRIMARY KEY,
+		tool       TEXT    NOT NULL,
+		result     BLOB    NOT NULL,
+		created_at INTEGER NOT NULL
+	) WITHOUT ROWID;`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

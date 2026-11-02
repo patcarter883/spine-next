@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="0.030" timestamp="2026-11-02T10:29:44.234837+00:00" hostname="vm"><testcase classname="tests.test_a" name="test_ok" time="0.001" /><testcase classname="tests.test_a" name="test_bad" time="0.001"><failure message="assert 3 == 4&#10; +  where 3 = add(1, 2)">def test_bad():
+&gt;       assert add(1,2)==4
+E       assert 3 == 4
+E        +  where 3 = add(1, 2)
+
+tests/test_a.py:8: AssertionError</failure></testcase><testcase classname="tests.test_a" name="test_err" time="0.001"><failure message="RuntimeError: x">def test_err():
+&gt;       raise RuntimeError("x")
+E       RuntimeError: x
+
+tests/test_a.py:11: RuntimeError</failure></testcase></testsuite></testsuites>

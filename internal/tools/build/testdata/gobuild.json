@@ -1,0 +1,7 @@
+{"ImportPath":"ex.com/m/q [ex.com/m/q.test]","Action":"build-output","Output":"# ex.com/m/q [ex.com/m/q.test]\n"}
+{"ImportPath":"ex.com/m/q [ex.com/m/q.test]","Action":"build-output","Output":"q/q.go:2:23: cannot use \"x\" (untyped string constant) as int value in return statement\n"}
+{"ImportPath":"ex.com/m/q [ex.com/m/q.test]","Action":"build-output","Output":"q/q.go:3:9: undefined: undefinedThing\n"}
+{"ImportPath":"ex.com/m/q [ex.com/m/q.test]","Action":"build-fail"}
+{"Time":"2026-11-02T10:26:23.293172417Z","Action":"start","Package":"ex.com/m/q"}
+{"Time":"2026-11-02T10:26:23.293249097Z","Action":"output","Package":"ex.com/m/q","Output":"FAIL\tex.com/m/q [build failed]\n","OutputType":"frame"}
+{"Time":"2026-11-02T10:26:23.293261253Z","Action":"fail","Package":"ex.com/m/q","Elapsed":0,"FailedBuild":"ex.com/m/q [ex.com/m/q.test]"}

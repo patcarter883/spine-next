@@ -1,0 +1,2 @@
+PHP Parse error:  syntax error, unexpected token "{", expecting variable in bad.php on line 2
+Errors parsing bad.php

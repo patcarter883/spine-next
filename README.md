@@ -56,7 +56,31 @@ What the controller guarantees:
 - **Failures escalate rather than loop.** Budgets (attempts, rounds, wall clock, tokens) are enforced as a closed set of legal supervisor actions; when none is left, the task escalates to you with its worktree kept.
 - **Your checkout is never touched mid-edit.** If `main` is checked out with uncommitted changes to tracked files, integration waits instead of overwriting them.
 
-## Status: MVP (M0–M2 complete, plus the M4 dashboard; M3 LLM supervisor not started)
+## Status: MVP (M0–M2 complete; M3 LLM supervisor and M4 dashboard implemented, not yet validated against live models)
+
+### M3: LLM supervisor
+
+The LLM supervisor is opt-in; the rule supervisor stays the default. To turn it on, add this to `.spine/config.yaml`:
+
+```yaml
+supervisor:
+  type: llm             # default: rules
+  model: claude-opus-5-5
+  effort: medium        # low|medium|high|xhigh|max
+  timeout: 2m
+```
+
+Credentials come from the environment, the same way the Anthropic SDK finds them: `ANTHROPIC_API_KEY`, `ant auth login`, and so on. How it works:
+
+1. When a round fails, Spine sends the model a typed observation: the budget, round history, new failures only, and the rule supervisor's suggestion.
+2. The model must answer with a JSON object matching a schema (structured output). The schema's `action` enum lists only the currently legal actions.
+3. The reconciler re-checks legality. If the model call errors, the model refuses, or the output is invalid or illegal, the rule supervisor decides instead.
+4. Every decision event records which supervisor decided, plus the fallback reason if there was one.
+
+The model never writes status, and it cannot choose Verify or Merge.
+
+Tests run against a fake Messages API (`internal/reconciler/llm_test.go`, `internal/e2e/llm_test.go`). The M3 exit criterion, an A/B comparison with the rule supervisor on the corpus (pass rate at least equal, fewer tokens per task), needs live model runs and has not been done.
+
 
 ### M2: controller, ACP agent runner, CLI
 

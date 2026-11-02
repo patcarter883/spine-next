@@ -5,6 +5,8 @@ package app
 
 import (
 	"context"
+
+	"github.com/anthropics/anthropic-sdk-go/v2"
 	"os"
 	"path/filepath"
 
@@ -88,8 +90,15 @@ func Open(ctx context.Context, repo string, o Options) (*App, error) {
 		&build.Runner{ScratchDir: scratch, Artifacts: &artifacts.Store{Dir: filepath.Join(cd, "spine", "artifacts")}})
 	a.Gate = &gate.Engine{Reg: a.Registry, ScratchDir: scratch}
 	a.Runner = &agent.Runner{Procs: a.WT, Version: Version}
+	var sup reconciler.Supervisor
+	if a.Config.Supervisor.Type == "llm" {
+		// Credentials come from the environment (ANTHROPIC_API_KEY, an
+		// `ant auth login` profile, ...), resolved by the SDK.
+		sup = &reconciler.LLMSupervisor{Client: anthropic.NewClient(), Model: a.Config.Supervisor.Model,
+			Effort: a.Config.Supervisor.Effort, Timeout: a.Config.Supervisor.Timeout}
+	}
 	a.Controller = reconciler.New(reconciler.Deps{Store: st, WT: a.WT, Gate: a.Gate, Runner: a.Runner, Config: a.Config,
-		Logf: o.Logf, Workers: o.Workers, ParseAvailable: ast.Available()})
+		Supervisor: sup, Logf: o.Logf, Workers: o.Workers, ParseAvailable: ast.Available()})
 	return a, nil
 }
 

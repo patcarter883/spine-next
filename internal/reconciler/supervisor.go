@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sort"
@@ -24,11 +25,13 @@ type Observation struct {
 	FailsOnBase bool // the gate failed on the merge result, not the branch
 }
 
-// Supervisor maps an observation to a decision. Only RuleSupervisor exists
-// in v2.0; the LLM supervisor (M3) implements the same interface and falls
-// back to the rules on error or an illegal action.
+// Supervisor maps an observation to a decision. RuleSupervisor is
+// deterministic; LLMSupervisor (M3) asks a model. The reconciler falls back
+// to the rules when a supervisor errors or picks an action outside
+// Observation.Legal, so a supervisor can never widen what the budget allows.
 type Supervisor interface {
-	Decide(obs Observation) api.Decision
+	Decide(ctx context.Context, obs Observation) (api.Decision, error)
+	Name() string
 }
 
 // legalActions encodes the budget as a closed set (RFC §4.6).
@@ -69,7 +72,14 @@ func fpKey(g *api.GateSummary) string {
 //  4. scope violations → patch with "revert out-of-scope changes";
 //  5. otherwise patch with the top new diagnostics;
 //  6. nothing legal left → escalate (budget exhausted).
-func (RuleSupervisor) Decide(o Observation) api.Decision {
+func (RuleSupervisor) Decide(_ context.Context, o Observation) (api.Decision, error) {
+	return RuleSupervisor{}.decide(o), nil
+}
+
+// Name identifies the supervisor in decision events.
+func (RuleSupervisor) Name() string { return "rules" }
+
+func (RuleSupervisor) decide(o Observation) api.Decision {
 	legal := func(a api.ActionKind) bool { return slices.Contains(o.Legal, a) }
 	patchOr := func(reason, hint string, focus []string) api.Decision {
 		if legal(api.ActPatchWorker) {

@@ -520,12 +520,30 @@ func (c *Controller) decide(ctx context.Context, t *api.Task, b api.Budget, snap
 		obs.HasBest = true
 		obs.BestIsLast = best.Commit == snap.Commit
 	}
-	d := c.Supervisor.Decide(obs)
-	if !slices.Contains(obs.Legal, d.Action) {
-		d = RuleSupervisor{}.Decide(obs)
+	by := c.Supervisor.Name()
+	d, err := c.Supervisor.Decide(ctx, obs)
+	var fallback string
+	switch {
+	case err != nil:
+		fallback = err.Error()
+	case !slices.Contains(obs.Legal, d.Action):
+		fallback = fmt.Sprintf("illegal action %q (legal: %v)", d.Action, obs.Legal)
+	case d.Action == api.ActRollback && !obs.HasBest:
+		fallback = "rollback without a best snapshot"
 	}
-	c.event(t.ID, "decision", map[string]any{"decision": d, "legal": obs.Legal, "round": t.Status.PatchRound, "attempt": t.Status.Attempt,
-		"conflicts": conflicts, "fails_on_base": failsOnBase})
+	if fallback != "" {
+		d = RuleSupervisor{}.decide(obs)
+		by = "rules (fallback)"
+	}
+	if len(d.Hint) > 500 {
+		d.Hint = d.Hint[:500]
+	}
+	ev := map[string]any{"decision": d, "legal": obs.Legal, "round": t.Status.PatchRound, "attempt": t.Status.Attempt,
+		"conflicts": conflicts, "fails_on_base": failsOnBase, "supervisor": by}
+	if fallback != "" {
+		ev["fallback_reason"] = trunc(fallback, 500)
+	}
+	c.event(t.ID, "decision", ev)
 
 	fb := feedback(obs, d)
 	switch d.Action {

@@ -33,6 +33,15 @@ type Config struct {
 	Identity     worktree.Identity
 	WorktreeRoot string
 	Resync       time.Duration
+	Supervisor   Supervisor
+}
+
+// Supervisor selects how failed rounds are decided (RFC §3.5).
+type Supervisor struct {
+	Type    string        // "rules" (default) or "llm"
+	Model   string        // llm: default claude-opus-5-5
+	Effort  string        // llm: low|medium|high|xhigh|max (default medium)
+	Timeout time.Duration // llm: per decision (default 2m)
 }
 
 type rawAdapter struct {
@@ -67,17 +76,24 @@ type raw struct {
 	Identity     worktree.Identity     `yaml:"identity"`
 	WorktreeRoot string                `yaml:"worktree_root"`
 	Resync       string                `yaml:"resync"`
+	Supervisor   struct {
+		Type    string `yaml:"type"`
+		Model   string `yaml:"model"`
+		Effort  string `yaml:"effort"`
+		Timeout string `yaml:"timeout"`
+	} `yaml:"supervisor"`
 }
 
 // Default returns the configuration used when no file exists.
 func Default() Config {
 	return Config{
-		Agent:    "claude",
-		Adapters: map[string]agent.Adapter{"claude": agent.ClaudeAdapter()},
-		Parallel: 4,
-		Base:     "refs/heads/main",
-		Budget:   api.Budget{}.WithDefaults(),
-		Resync:   15 * time.Second,
+		Agent:      "claude",
+		Adapters:   map[string]agent.Adapter{"claude": agent.ClaudeAdapter()},
+		Parallel:   4,
+		Base:       "refs/heads/main",
+		Budget:     api.Budget{}.WithDefaults(),
+		Resync:     15 * time.Second,
+		Supervisor: Supervisor{Type: "rules"},
 	}
 }
 
@@ -182,6 +198,23 @@ func Parse(b []byte) (Config, error) {
 		return Config{}, err
 	} else if d > 0 {
 		c.Resync = d
+	}
+	sv := r.Supervisor
+	switch sv.Type {
+	case "", "rules":
+		c.Supervisor = Supervisor{Type: "rules"}
+	case "llm":
+		c.Supervisor = Supervisor{Type: "llm", Model: sv.Model, Effort: sv.Effort}
+		switch sv.Effort {
+		case "", "low", "medium", "high", "xhigh", "max":
+		default:
+			return Config{}, fmt.Errorf("config: supervisor.effort %q is not low|medium|high|xhigh|max", sv.Effort)
+		}
+		if c.Supervisor.Timeout, err = dur(sv.Timeout, "supervisor.timeout"); err != nil {
+			return Config{}, err
+		}
+	default:
+		return Config{}, fmt.Errorf("config: supervisor.type must be rules or llm, not %q", sv.Type)
 	}
 	return c, nil
 }

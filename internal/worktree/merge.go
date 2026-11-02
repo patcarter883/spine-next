@@ -218,7 +218,7 @@ func (m *Manager) rescueCheckout(ctx context.Context, checkout string) (string, 
 	if err != nil {
 		return "", err
 	}
-	commit, err := m.git1(ctx, checkout, "commit-tree", strings.TrimSpace(tree), "-p", head, "-m", "spine rescue of "+checkout)
+	commit, err := m.git1(ctx, checkout, "commit-tree", "--no-gpg-sign", strings.TrimSpace(tree), "-p", head, "-m", "spine rescue of "+checkout)
 	if err != nil {
 		return "", err
 	}
@@ -240,7 +240,7 @@ func (m *Manager) ProposedCommit(ctx context.Context, snap *Snapshot, tip, msg s
 	if !res.Clean {
 		return "", res, ErrConflict
 	}
-	c, err := m.git1(ctx, m.primary, "commit-tree", res.ResultTree, "-p", tip, "-m", msg)
+	c, err := m.git1(ctx, m.primary, "commit-tree", "--no-gpg-sign", res.ResultTree, "-p", tip, "-m", msg)
 	return c, res, err
 }
 

@@ -65,7 +65,10 @@ func (m *Manager) snapshotLocked(ctx context.Context, l *Lease, label string) (*
 	}
 	tree := strings.TrimSpace(treeOut)
 	msg := fmt.Sprintf("spine snapshot %s #%d (%s)", l.TaskID, seq, label)
-	commit, err := m.git1(ctx, l.Path, "commit-tree", tree, "-p", head, "-m", msg)
+	// Hidden snapshot commits are never signed: signing is the operator's
+	// policy for commits that land, and a signing service outage must not
+	// stop snapshots (seen in practice: commit.gpgsign with a remote signer).
+	commit, err := m.git1(ctx, l.Path, "commit-tree", "--no-gpg-sign", tree, "-p", head, "-m", msg)
 	if err != nil {
 		return nil, err
 	}

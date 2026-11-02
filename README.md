@@ -4,7 +4,101 @@ This is Spine v2: a deterministic harness that supervises parallel coding agents
 
 The design is [RFC 0001](docs/rfcs/0001-spine-v2-go-reconciler.md).
 
-## Status: M1 (deterministic tools and gates)
+## Quick start (MVP)
+
+Requirements:
+
+- Linux.
+- Go 1.27.3 or newer, with a C compiler (for the tree-sitter gates).
+- git 2.38 or newer.
+- Claude Code's ACP adapter: `npm install -g @agentclientprotocol/claude-agent-acp`.
+- Claude credentials: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or a logged-in `~/.claude`.
+
+```sh
+go install github.com/patcarter883/spine-next/cmd/spine@main
+cd your-repo
+spine init                      # scaffolds .spine/config.yaml and .spine/gates.yaml
+git add .spine && git commit -m "Add Spine config"   # gates are read from the base branch
+spine doctor --agent            # checks git, store, gates and the agent's ACP handshake
+spine run --scope 'src/**' "Add input validation to the signup handler"
+```
+
+`spine run` creates the task and runs the whole loop without further input:
+
+1. It provisions an isolated git worktree outside your checkout.
+2. It runs Claude Code over ACP inside that worktree.
+3. It snapshots the result and runs your gates.
+4. If a gate fails, it feeds the new failures back to the agent in a repair round. A run that crashes or stalls gets a repair round too, without the gates.
+5. Once the gates pass, it squash-merges into `main` with a compare-and-swap. If `main` has moved, the exact merge result is gated first.
+
+If no controller is running, `spine run` starts one inline and exits when the task finishes: exit 0 means integrated. If one is running (`spine controller`), it submits the task and follows its progress.
+
+Other commands:
+
+| Command | What it does |
+|---|---|
+| `spine list [--all]` | List tasks. |
+| `spine status ID [--json]` | Show one task in detail. |
+| `spine logs ID [-f]` | Show the task's event log; `-f` follows it until the task finishes. |
+| `spine approve ID` | Integrate a task submitted with `--require-approval`. |
+| `spine retry ID` | Give an escalated or failed task one more fresh attempt. |
+| `spine cancel ID` | Stop the agent and release the worktree. |
+| `spine controller` | Run the controller in the foreground. It reconciles every task and resumes after a crash or `kill -9`. |
+| `spine recover` | Repair state after a crash. |
+| `spine gc` | Checkpoint the SQLite WAL. |
+
+What the controller guarantees:
+
+- **Only gates can mark work done.** Gates come from the base branch, so an agent can't weaken them. Storage rejects any `GatePassed`, `Verified` or `Integrated` write from a component that doesn't own that condition.
+- **The tree that lands is the tree that passed.** Integration is a compare-and-swap against the exact base tip the verdict was computed on.
+- **Approval only holds work back.** It can delay a verified task, never pass a failing one.
+- **Failures escalate rather than loop.** Budgets (attempts, rounds, wall clock, tokens) are enforced as a closed set of legal supervisor actions; when none is left, the task escalates to you with its worktree kept.
+- **Your checkout is never touched mid-edit.** If `main` is checked out with uncommitted changes to tracked files, integration waits instead of overwriting them.
+
+## Status: MVP (M0–M2 complete; M3 LLM supervisor and M4 UI not started)
+
+### M2: controller, ACP agent runner, CLI
+
+| Package | What it does |
+|---|---|
+| `internal/acp` | An Agent Client Protocol v1 client: JSON-RPC 2.0 over newline-delimited stdio. Methods and shapes come from the `@agentclientprotocol/sdk` 2.x `schema/v1`. |
+| `internal/agent` | The ACP runner. Spine advertises no `fs` or `terminal` capabilities, so the agent edits the worktree itself; see the policy list below. It also renders the typed prompt. `fakeacp` is a scripted ACP agent for tests. |
+| `internal/reconciler` | The level-triggered controller (RFC §4): a per-key workqueue, `Reconcile`, asynchronous agent and gate operations, `RuleSupervisor`, and integration that gates the merge result. In-flight operations are persisted, so a restarted controller turns orphans into crashed outcomes. Commands are staged and applied inside the task's own reconcile. |
+| `internal/storage` | Adds tasks with resource-version CAS, condition-ownership enforcement, an append-only event log, and read-only opens for the CLI. |
+| `internal/inbox` | Atomic command files from the CLI to the controller. The controller is the database's only writer. |
+| `internal/config`, `internal/app`, `cmd/spine` | Operator config, component wiring, and the CLI. |
+| `internal/e2e` | End-to-end tests of the whole controller against real repositories; see the scenario list below. |
+
+The ACP runner's policies:
+
+- **Permissions:** tool calls are allowed only when their locations are inside the worktree.
+- **Interruptions:** on a timeout, stall or exceeded token budget, the runner sends `session/cancel`.
+- **Process group:** reaped before `Run` returns.
+
+The end-to-end scenarios:
+
+- **M2 exit criterion:** 8 parallel tasks, integrated through CAS with a clean primary checkout and a `main` that passes its own tests. They include a feedback repair round, an agent crash, an agent that commits on its own, and two tasks that conflict.
+- **Approval and moved base:** an approval hold, followed by a merge-result gate failure on a moved base and a fresh attempt.
+- **Escalation and retry:** no-progress escalation, then retry.
+- **Restart:** the controller is restarted mid-run.
+- **Cancel:** stops the agent and releases the worktree.
+
+Verified by hand with the built binary:
+
+- `spine run` against a scratch repository.
+- `kill -9` of a running `spine controller` mid-agent-run. The agent died with it via Pdeathsig, and a new controller recorded the crash, ran a repair round, gated and integrated.
+
+**Not yet verified:** a live run with the real `claude-agent-acp` adapter. Starting it was blocked in the build environment because it would use that session's Claude credentials. The client follows the adapter's v1 schema and has been checked against a protocol-faithful fake. `spine doctor --agent` performs the real handshake (`initialize` and `session/new`, no prompt and no tokens) on your machine.
+
+### Deviations from RFC 0001, decided while building M2
+
+- **A merge conflict, or a failure that only shows up on the merged tree, gets a fresh attempt from the new base.** The RFC's in-place rebase within the patch budget is deferred. Feedback carries the conflicting paths.
+- **Each round starts a new agent process with a complete typed prompt**, rather than resuming the ACP session. The worktree keeps the previous round's changes.
+- **The CLI never writes the database.** It drops atomic command files in `<git-common-dir>/spine/inbox`; the controller applies them idempotently and only then deletes them.
+- **M0 recovery now kills only orphaned git processes in the primary checkout.** M0 killed every orphaned process whose cwd was in the repository, which included an operator's daemonized dev server. Under Spine's worktree root, every orphan is still killed. `TestRecoverSparesOperatorDaemons` covers this.
+- **The mid-run token budget uses ACP `usage_update.used` (context tokens) as a lower bound.** The exact spend comes from the adapter's `PromptResponse.usage`.
+
+## Earlier milestones
 
 ### M0: isolation and crash recovery
 

@@ -348,9 +348,13 @@ func procsUnder(dirs ...string) []int {
 	return out
 }
 
-// killOrphans kills reparented orphans (parent is init or a subreaper)
-// working inside the repository, the common dir or Root. A live operator's
-// git has a live parent (their shell) and is never touched. Returns the pids
+// killOrphans kills reparented orphans (parent is init or a subreaper) that
+// a dead controller left running: any such process under Root (Spine owns
+// those directories), and orphaned git processes in the primary checkout or
+// common dir. It never touches non-git processes outside Root: an
+// operator's daemonized dev server or watcher started in the repository is
+// also reparented, and is not Spine's to kill. A live operator's git has a
+// live parent (their shell) and is never touched either. Returns the pids
 // killed after waiting for them to exit.
 func (m *Manager) killOrphans() []int {
 	sub := pidutil.DetectUserSubreaperPID(os.Getpid())
@@ -360,6 +364,9 @@ func (m *Manager) killOrphans() []int {
 		if err != nil || !pidutil.IsReparentedOrphan(ppid, sub) {
 			continue
 		}
+		if !underRoot(pid, m.cfg.Root) && !isGitProcess(pid) {
+			continue
+		}
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		killed = append(killed, pid)
 	}
@@ -367,14 +374,18 @@ func (m *Manager) killOrphans() []int {
 	return killed
 }
 
-// waitGone waits until none of pids is alive (zombies count as gone).
-func waitGone(pids []int, limit time.Duration) {
-	deadline := time.Now().Add(limit)
-	for _, pid := range pids {
-		for time.Now().Before(deadline) && pidutil.Alive(pid) {
-			time.Sleep(10 * time.Millisecond)
-		}
+func underRoot(pid int, root string) bool {
+	cwd, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "cwd"))
+	return err == nil && root != "" && within(cwd, root)
+}
+
+// isGitProcess reports git and its helpers (git-remote-https, ...).
+func isGitProcess(pid int) bool {
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "comm"))
+	if err != nil {
+		return false
 	}
+	return strings.HasPrefix(strings.TrimSpace(string(b)), "git")
 }
 
 func killProcsUnder(root string) []int {
@@ -386,4 +397,14 @@ func killProcsUnder(root string) []int {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 	return pids
+}
+
+// waitGone waits until none of pids is alive (zombies count as gone).
+func waitGone(pids []int, limit time.Duration) {
+	deadline := time.Now().Add(limit)
+	for _, pid := range pids {
+		for time.Now().Before(deadline) && pidutil.Alive(pid) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }

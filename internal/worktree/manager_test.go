@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -423,4 +425,33 @@ func TestRecoverPurgesInitializingRegistration(t *testing.T) {
 		t.Fatalf("recover: %v %+v", err, rep)
 	}
 	f.healthy()
+}
+
+// Recover must not kill an operator's daemonized (reparented) non-git
+// process that happens to run inside the repository.
+func TestRecoverSparesOperatorDaemons(t *testing.T) {
+	f := newFixture(t)
+	// setsid in a background subshell: the sleeper is reparented to
+	// init/subreaper, with its cwd in the primary checkout.
+	out, err := exec.Command("sh", "-c", "cd "+f.repo+" && (setsid sleep 30 >/dev/null 2>&1 & echo $!)").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	defer syscall.Kill(pid, syscall.SIGKILL)
+	time.Sleep(200 * time.Millisecond)
+	rep, err := f.m.Recover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range rep.StrayProcsKilled {
+		if k == pid {
+			t.Fatalf("Recover killed an operator process (pid %d)", pid)
+		}
+	}
+	// A killed process lingers as a zombie, so check the state, not kill(0).
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil || strings.Contains(string(stat), ") Z ") {
+		t.Fatalf("operator process %d is dead: %v %s", pid, err, stat)
+	}
 }

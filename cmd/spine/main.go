@@ -36,6 +36,8 @@ func main() {
 	cmd, args := os.Args[1], os.Args[2:]
 	var err error
 	switch cmd {
+	case "init":
+		err = runInit(ctx, args)
 	case "run":
 		err = runRun(ctx, args)
 	case "controller":
@@ -77,6 +79,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: spine <command> [flags]
 
 commands:
+  init        scaffold .spine/config.yaml and .spine/gates.yaml for this repository
   run         submit a task: spine run [--scope GLOB]... [--base BRANCH] [--require-approval] "intent"
               (runs a controller inline until the task finishes if none is running)
   controller  run the controller for this repository until interrupted
@@ -102,12 +105,14 @@ func repoFlag(name string, args []string) (string, *flag.FlagSet, error) {
 }
 
 func runDoctor(ctx context.Context, args []string) error {
-	repo, _, err := repoFlag("doctor", args)
-	if err != nil {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	repo := fs.String("repo", ".", "repository (any checkout)")
+	probe := fs.Bool("agent", false, "also start the agent adapter and check its ACP handshake (no prompt is sent)")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	failed := false
-	for _, f := range doctor.Run(ctx, repo) {
+	for _, f := range append(doctor.Run(ctx, *repo), doctor.Agent(ctx, *repo, *probe)...) {
 		fmt.Printf("%-4s  %-10s  %s\n", f.Level, f.Check, f.Message)
 		failed = failed || f.Level == doctor.Fail
 	}

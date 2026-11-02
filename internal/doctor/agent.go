@@ -1,0 +1,89 @@
+package doctor
+
+import (
+	"context"
+	"fmt"
+	"os"
+	osexec "os/exec"
+	"strings"
+
+	"github.com/patcarter883/spine-next/internal/agent"
+	"github.com/patcarter883/spine-next/internal/config"
+	"github.com/patcarter883/spine-next/internal/gate"
+	"github.com/patcarter883/spine-next/internal/gitro"
+	"github.com/patcarter883/spine-next/internal/tools/ast"
+	"github.com/patcarter883/spine-next/internal/worktree"
+)
+
+// Agent checks the controller configuration, the default agent adapter and
+// the gates file at the base branch. With probe, it also starts the adapter
+// and performs the ACP handshake (initialize + session/new) in a scratch
+// directory; no prompt is sent.
+func Agent(ctx context.Context, repoDir string, probe bool) []Finding {
+	var out []Finding
+	add := func(l Level, check, format string, args ...any) {
+		out = append(out, Finding{Level: l, Check: check, Message: fmt.Sprintf(format, args...)})
+	}
+	primary, err := worktree.PrimaryOf(ctx, repoDir)
+	if err != nil {
+		return out
+	}
+	cfg, err := config.Load(primary)
+	if err != nil {
+		add(Fail, "config", "%v", err)
+		return out
+	}
+	add(OK, "config", "agent %q, %d parallel, base %s", cfg.Agent, cfg.Parallel, cfg.Base)
+	if !ast.Available() {
+		add(Warn, "tree-sitter", "built without CGO: ts.* gates are unavailable")
+	}
+	if _, err := (gitro.Repo{Dir: primary}).Line(ctx, "rev-parse", "--verify", "-q", cfg.Base); err != nil {
+		add(Fail, "base", "%s does not exist (set base: in %s)", cfg.Base, config.Path)
+	} else if gc, ok, err := gate.LoadConfig(ctx, primary, cfg.Base); err != nil {
+		add(Fail, "gates", "%s at %s: %v", gate.ConfigPath, cfg.Base, err)
+	} else if !ok {
+		add(Warn, "gates", "no %s at %s: only the default gates (parse, scope, nonempty) apply", gate.ConfigPath, cfg.Base)
+	} else {
+		add(OK, "gates", "%s", strings.Join(gc.Order, ", "))
+	}
+	a := cfg.Adapters[cfg.Agent]
+	if _, err := osexec.LookPath(a.Argv[0]); err != nil {
+		hint := ""
+		if a.Argv[0] == "claude-agent-acp" {
+			hint = " (install: npm install -g @agentclientprotocol/claude-agent-acp)"
+		}
+		add(Fail, "agent", "%s not found on PATH%s", a.Argv[0], hint)
+		return out
+	}
+	add(OK, "agent", "%s: %s", a.Name, strings.Join(a.Argv, " "))
+	if a.Name == "claude" && os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
+		add(Warn, "agent", "neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set; Claude Code must find credentials in ~/.claude")
+	}
+	if probe {
+		dir, err := os.MkdirTemp("", "spine-probe-")
+		if err != nil {
+			add(Fail, "acp", "%v", err)
+			return out
+		}
+		defer os.RemoveAll(dir)
+		r, err := agent.Probe(ctx, a, dir)
+		if err != nil {
+			add(Fail, "acp", "%v", err)
+		} else {
+			add(OK, "acp", "%s %s speaks ACP v%d; modes %s", r.Agent, r.Version, r.Protocol, strings.Join(r.Modes, ","))
+			if a.Mode != "" && len(r.Modes) > 0 && !contains(r.Modes, a.Mode) {
+				add(Warn, "acp", "configured mode %q is not offered by the agent", a.Mode)
+			}
+		}
+	}
+	return out
+}
+
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}

@@ -104,10 +104,10 @@ func goBuildLines(in ParseInput, out []byte) []tools.Diagnostic {
 // - gotest-json -
 
 type goTestEvent struct {
-	Action     string
-	Package    string
-	ImportPath string
-	Test       string
+	Action      string
+	Package     string
+	ImportPath  string
+	Test        string
 	Output      string
 	OutputType  string
 	FailedBuild string

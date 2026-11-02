@@ -265,7 +265,7 @@ func (r *Runner) run(ctx context.Context, root string, a Args) (tools.Result, er
 		res.ExitCode = 124
 		res.NoCache = true // a timeout is not a function of the tree
 		res.Diagnostics = []tools.Diagnostic{{Severity: tools.Error, Code: "Timeout",
-			Message: fmt.Sprintf("%s did not finish within %s", strings.Join(a.Argv, " "), timeout.Round(time.Second)),
+			Message:     fmt.Sprintf("%s did not finish within %s", strings.Join(a.Argv, " "), timeout.Round(time.Second)),
 			Fingerprint: tools.Fingerprint("cmd.run", "Timeout", strings.Join(a.Argv, " "))}}
 		return res, nil
 	}

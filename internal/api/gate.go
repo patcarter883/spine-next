@@ -58,15 +58,15 @@ type GateVerdict struct {
 	Skipped  bool       `json:"skipped,omitempty"`
 	// ToolExitCode is the raw exit code on the evaluated tree; BaseExitCode
 	// the raw exit code on the base tree (baseline policy only).
-	ToolExitCode int          `json:"tool_exit_code"`
-	BaseExitCode *int         `json:"base_exit_code,omitempty"`
-	New          []Diagnostic `json:"new,omitempty"`   // failures attributed to the change
-	Fixed        []string     `json:"fixed,omitempty"` // baseline fingerprints no longer present
-	Excused      int          `json:"excused,omitempty"`
+	ToolExitCode int                `json:"tool_exit_code"`
+	BaseExitCode *int               `json:"base_exit_code,omitempty"`
+	New          []Diagnostic       `json:"new,omitempty"`   // failures attributed to the change
+	Fixed        []string           `json:"fixed,omitempty"` // baseline fingerprints no longer present
+	Excused      int                `json:"excused,omitempty"`
 	Metrics      map[string]float64 `json:"metrics,omitempty"`
-	Cached       bool         `json:"cached"`
-	Duration     time.Duration `json:"duration_ns"`
-	Reason       string       `json:"reason,omitempty"` // CamelCase machine reason
+	Cached       bool               `json:"cached"`
+	Duration     time.Duration      `json:"duration_ns"`
+	Reason       string             `json:"reason,omitempty"` // CamelCase machine reason
 }
 
 // Passed reports whether the verdict lets the task proceed.

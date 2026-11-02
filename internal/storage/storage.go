@@ -29,6 +29,9 @@ import (
 // ErrNotFound is returned only when a row is absent.
 var ErrNotFound = errors.New("storage: not found")
 
+// ErrReadOnly is a write on a store opened with OpenReadOnly.
+var ErrReadOnly = errors.New("storage: store is read-only")
+
 // ErrLocked means another process holds the database's writer lock.
 var ErrLocked = errors.New("storage: database is held by another spine process")
 
@@ -78,6 +81,47 @@ func Open(ctx context.Context, path string, opts Options) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenReadOnly opens an existing database for reading without taking the
+// writer lock, so CLI reads (status, list, logs) work while a controller
+// runs. WAL lets readers proceed alongside the single writer.
+func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "query_only(1)")
+	r, err := sql.Open("sqlite", "file:"+path+"?mode=ro&"+q.Encode())
+	if err != nil {
+		return nil, err
+	}
+	r.SetMaxOpenConns(4)
+	var v int
+	if err := r.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+		r.Close()
+		return nil, err
+	}
+	if v > len(migrations) {
+		r.Close()
+		return nil, fmt.Errorf("storage: schema version %d is newer than this binary (%d)", v, len(migrations))
+	}
+	return &Store{path: path, r: r}, nil
+}
+
+// IsLocked reports whether another process holds the writer lock.
+func IsLocked(path string) bool {
+	f, err := os.OpenFile(path+".flock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true
+	}
+	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return false
 }
 
 // Path returns the database file path.
@@ -147,6 +191,9 @@ func acquireFlock(path string, wait time.Duration) (*os.File, error) {
 
 // tx runs fn in a BEGIN IMMEDIATE transaction on the writer connection.
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
+	if s.w == nil {
+		return ErrReadOnly
+	}
 	t, err := s.w.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -160,6 +207,9 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 
 // Checkpoint truncates the WAL (spine gc, §7.1).
 func (s *Store) Checkpoint(ctx context.Context) error {
+	if s.w == nil {
+		return ErrReadOnly
+	}
 	_, err := s.w.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
 	return err
 }

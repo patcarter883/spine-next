@@ -40,6 +40,11 @@ type Cmd struct {
 	// parent environment is never inherited wholesale.
 	Env   []string
 	Stdin []byte
+	// StdinFile, when set, is the child's stdin (typically the read end of an
+	// os.Pipe whose write end the caller keeps, for interactive protocols
+	// such as ACP). Run closes it in the parent once the child has started.
+	// A file, not an io.Reader, so Wait never blocks on a copy goroutine.
+	StdinFile *os.File
 	// Timeout bounds the run; zero means only ctx bounds it.
 	Timeout time.Duration
 	// Grace is the SIGTERM→SIGKILL delay; zero means DefaultGrace.
@@ -125,6 +130,9 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 	if c.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(c.Stdin)
 	}
+	if c.StdinFile != nil {
+		cmd.Stdin = c.StdinFile
+	}
 	processgroup.StartCommandInNewGroup(cmd)
 	if !c.DisableParentDeathSignal {
 		setParentDeathSignal(cmd)
@@ -161,10 +169,16 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 		outW.Close()
 		errR.Close()
 		errW.Close()
+		if c.StdinFile != nil {
+			c.StdinFile.Close()
+		}
 		return Result{}, fmt.Errorf("exec %s: %w", c.Argv[0], err)
 	}
 	outW.Close()
 	errW.Close()
+	if c.StdinFile != nil {
+		c.StdinFile.Close() // the child holds its own descriptor
+	}
 	pgid := cmd.Process.Pid
 
 	var readers sync.WaitGroup

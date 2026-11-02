@@ -59,6 +59,26 @@ var migrations = []string{
 		result     BLOB    NOT NULL,
 		created_at INTEGER NOT NULL
 	) WITHOUT ROWID;`,
+	// 3: tasks (spec/status documents with a resource version) and the
+	// append-only per-task event log (decisions, outcomes, verdicts).
+	`CREATE TABLE tasks (
+		id         TEXT    PRIMARY KEY,
+		spec       TEXT    NOT NULL,
+		status     TEXT    NOT NULL,
+		phase      TEXT    NOT NULL,
+		rv         INTEGER NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+	CREATE INDEX tasks_phase ON tasks(phase);
+	CREATE TABLE events (
+		id      INTEGER PRIMARY KEY,
+		task_id TEXT    NOT NULL,
+		at      INTEGER NOT NULL,
+		kind    TEXT    NOT NULL,
+		data    TEXT    NOT NULL
+	);
+	CREATE INDEX events_task ON events(task_id, id);`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {

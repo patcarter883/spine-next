@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spine</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--fg:#1c1c1a;--muted:#6b6b66;--line:#e3e3de;--accent:#2f5bd3;
+--ok:#1f7a45;--okbg:#e3f3e9;--bad:#b3261e;--badbg:#fbe7e5;--warn:#8a5a00;--warnbg:#fbf0d9;--run:#2f5bd3;--runbg:#e6ecfb}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--panel:#1d1d1b;--fg:#ecece8;--muted:#a3a39c;--line:#33332f;--accent:#8ea8ff;
+--ok:#7fd3a0;--okbg:#17321f;--bad:#ff9a8f;--badbg:#3a1714;--warn:#f2c46b;--warnbg:#352812;--run:#8ea8ff;--runbg:#1c2442}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:1}
+header h1{font-size:16px;margin:0}#ctl{font-size:12px;color:var(--muted)}#ctl b{color:var(--ok)}#ctl.off b{color:var(--bad)}
+main{display:grid;grid-template-columns:minmax(300px,420px) 1fr;min-height:calc(100vh - 50px)}
+@media (max-width:800px){main{grid-template-columns:1fr}}
+#list{border-right:1px solid var(--line);overflow:auto}
+.filters{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.filters button{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+.filters button.on{border-color:var(--accent);color:var(--accent)}
+.task{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}.task:hover{background:var(--panel)}.task.sel{background:var(--panel);box-shadow:inset 3px 0 var(--accent)}
+.task .t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task .m{font-size:12px;color:var(--muted);display:flex;gap:8px;margin-top:3px}
+.badge{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--runbg);color:var(--run)}
+.b-Integrated{background:var(--okbg);color:var(--ok)}.b-Failed,.b-Cancelled{background:var(--badbg);color:var(--bad)}.b-Escalated{background:var(--warnbg);color:var(--warn)}
+#detail{padding:16px 20px;overflow:auto}#detail .empty{color:var(--muted);margin-top:40px;text-align:center}
+h2{font-size:18px;margin:0 0 4px}.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;margin:12px 0;font-size:13px}.kv dt{color:var(--muted)}.kv dd{margin:0;word-break:break-all}
+.actions{display:flex;gap:8px;margin:10px 0}.actions button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+.actions button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0}section h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500}
+.pass{color:var(--ok)}.fail{color:var(--bad)}.skip{color:var(--muted)}
+.ev{display:grid;grid-template-columns:70px 1fr;gap:8px;font-size:13px;padding:3px 0;border-bottom:1px dashed var(--line)}.ev time{color:var(--muted);font-variant-numeric:tabular-nums}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.diag{font-size:12px;margin:2px 0 2px 12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header><h1>Spine</h1><span id="ctl">connecting…</span></header>
+<main>
+<div id="list"><div class="filters" id="filters"></div><div id="tasks"></div></div>
+<div id="detail"><div class="empty">Select a task.</div></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let tasks=[],sel=null,filter="active";
+try{filter=localStorage.getItem("spine.filter")||"active"}catch(e){}
+const FILTERS={active:t=>!["Integrated","Failed","Cancelled"].includes(t.phase),needs:t=>t.needs_you,done:t=>t.phase==="Integrated",all:()=>true};
+const LABEL={active:"Active",needs:"Needs you",done:"Integrated",all:"All"};
+function ago(d){const s=(Date.now()-new Date(d))/1000;if(s<60)return Math.round(s)+"s";if(s<3600)return Math.round(s/60)+"m";if(s<86400)return Math.round(s/3600)+"h";return Math.round(s/86400)+"d"}
+function renderFilters(){$("#filters").innerHTML=Object.keys(FILTERS).map(k=>{const n=tasks.filter(FILTERS[k]).length;return `<button data-f="${k}" class="${k===filter?"on":""}">${LABEL[k]} ${n}</button>`}).join("");
+ document.querySelectorAll("#filters button").forEach(b=>b.onclick=()=>{filter=b.dataset.f;try{localStorage.setItem("spine.filter",filter)}catch(e){};renderList()})}
+function renderList(){renderFilters();const rows=tasks.filter(FILTERS[filter]);
+ $("#tasks").innerHTML=rows.length?rows.map(t=>`<div class="task ${t.id===sel?"sel":""}" data-id="${esc(t.id)}"><div class="t">${esc(t.title)}</div>
+ <div class="m"><span class="badge b-${esc(t.phase)}">${esc(t.phase)}</span><span>${esc(t.reason)}</span><span>a${t.attempt} r${t.round}</span><span>${ago(t.created)}</span></div></div>`).join(""):`<div class="empty" style="padding:20px;color:var(--muted)">No tasks.</div>`;
+ document.querySelectorAll(".task").forEach(e=>e.onclick=()=>{sel=e.dataset.id;renderList();loadDetail()})}
+async function act(id,a){const r=await fetch(`/api/tasks/${encodeURIComponent(id)}/${a}`,{method:"POST",headers:{"X-Spine":"1"}});const j=await r.json().catch(()=>({}));
+ if(!j.controller)alert(a+" queued; it applies when a controller runs (spine controller).")}
+function describe(e){const d=e.data||{};switch(e.kind){
+ case "transition":return `${esc(d.from)} → <b>${esc(d.to)}</b> <span class="mono">${esc(d.reason)}</span> ${esc(d.message||"")}`;
+ case "agent_start":return `agent <b>${esc(d.adapter)}</b> started (attempt ${d.attempt}, round ${d.round})`+(d.feedback?` with ${d.feedback.length} feedback item(s)`:"");
+ case "agent":return d.kind==="tool_call"?`· ${esc(d.title)}`:d.kind==="permission"?`· permission <b>${esc(d.status)}</b>: ${esc(d.title)}`:null;
+ case "outcome":return `agent finished: <b>${esc(d.reason)}</b> ${esc(d.stop_reason||"")} (${d.tokens_used} tokens)`+(d.message?`<div class="diag">${esc(d.message).slice(0,300)}</div>`:"");
+ case "verdict":{const v=d.verdict||{};let s=v.passed?`<span class="pass">gates passed</span>`:`<span class="fail">gate <b>${esc(v.failed_gate)}</b> failed</span>`;s+=d.on_merge?" on the merge result":" on the branch";
+  for(const g of v.gates||[])for(const x of (g.new||[]).slice(0,5))s+=`<div class="diag"><span class="mono">${esc(x.code)}</span> ${esc(x.file||"")} ${esc((x.message||"").split("\n")[0]).slice(0,160)}</div>`;return s}
+ case "decision":return `decision: <b>${esc(d.decision?.action)}</b> (${esc(d.decision?.reason)})`;
+ case "integrated":return `<span class="pass">integrated</span> ${esc(d.base_ref)} at <span class="mono">${esc(String(d.commit).slice(0,12))}</span>`;
+ case "submitted":return "submitted";case "command":return `command <b>${esc(d.kind)}</b> by ${esc(d.by)}`;
+ default:return e.kind.endsWith("error")?`<span class="fail">${esc(e.kind)}</span>: ${esc(d.error)}`:null}}
+async function loadDetail(){if(!sel)return;const id=sel;
+ const [t,evs]=await Promise.all([fetch(`/api/tasks/${encodeURIComponent(id)}`).then(r=>r.json()),fetch(`/api/tasks/${encodeURIComponent(id)}/events`).then(r=>r.json())]);
+ if(id!==sel)return;const s=t.status,b=t.spec.budget||{};
+ const acts=[];if(s.phase==="Escalated"&&s.reason==="AwaitingApproval")acts.push(`<button class="primary" data-a="approve">Approve and integrate</button>`);
+ if(["Escalated","Failed","Cancelled"].includes(s.phase))acts.push(`<button data-a="retry">Retry</button>`);
+ if(!["Integrated","Failed","Cancelled"].includes(s.phase))acts.push(`<button data-a="cancel">Cancel</button>`);
+ let gates="";if(s.last_gate){gates=`<section><h3>Last gate run${s.last_gate.on_merge?" (merge result)":""}</h3><table><tr><th>Gate</th><th>Tool</th><th>Result</th><th>New</th><th>Excused</th></tr>`+
+  (s.last_gate.gates||[]).map(g=>`<tr><td>${esc(g.gate)}</td><td class="mono">${esc(g.tool)}</td><td class="${g.skipped?"skip":g.exit_code===0?"pass":"fail"}">${g.skipped?"skipped":g.exit_code===0?"pass":"fail "+esc(g.reason||"")}</td><td>${(g.new||[]).length}</td><td>${g.excused||0}</td></tr>`).join("")+`</table></section>`}
+ const conds=(s.conditions||[]).map(c=>`<span class="${c.status?"pass":"fail"}">${esc(c.type)}</span>`).join(" · ");
+ $("#detail").innerHTML=`<h2>${esc(t.spec.title||t.spec.intent.split("\n")[0])}</h2><span class="badge b-${esc(s.phase)}">${esc(s.phase)}</span> <span class="mono">${esc(s.reason||"")}</span>
+ <div class="actions">${acts.join("")}</div>
+ <dl class="kv"><dt>ID</dt><dd class="mono">${esc(t.id)}</dd><dt>Message</dt><dd>${esc(s.message||"—")}</dd><dt>Base</dt><dd class="mono">${esc(t.spec.base_ref)}</dd>
+ <dt>Scope</dt><dd class="mono">${esc((t.spec.scope||["everything"]).join(", "))}</dd><dt>Attempt</dt><dd>${s.attempt} of ${b.max_attempts||2}, round ${s.patch_round} of ${b.max_patch_rounds||3}</dd>
+ <dt>Tokens</dt><dd>${s.tokens_used}</dd>${s.worktree&&!["Integrated","Failed","Cancelled"].includes(s.phase)?`<dt>Worktree</dt><dd class="mono">${esc(s.worktree.path)}</dd>`:""}
+ ${s.integrated_commit?`<dt>Commit</dt><dd class="mono">${esc(s.integrated_commit)}</dd>`:""}<dt>Conditions</dt><dd>${conds||"—"}</dd></dl>
+ <section><h3>Intent</h3><div style="white-space:pre-wrap">${esc(t.spec.intent)}</div></section>${gates}
+ <section><h3>Timeline</h3>${evs.map(e=>{const h=describe(e);return h?`<div class="ev"><time>${new Date(e.at).toLocaleTimeString([],{hour12:false})}</time><div>${h}</div></div>`:""}).join("")}</section>`;
+ document.querySelectorAll(".actions button").forEach(b=>b.onclick=async()=>{b.disabled=true;await act(id,b.dataset.a);setTimeout(loadDetail,800)})}
+function connect(){const es=new EventSource("/api/stream");
+ es.addEventListener("tasks",e=>{const j=JSON.parse(e.data);tasks=j.tasks;const c=$("#ctl");c.className=j.controller?"":"off";c.innerHTML=j.controller?"controller <b>running</b>":"controller <b>stopped</b> — run <code>spine controller</code>";
+  if(!sel&&tasks.length)sel=tasks[0].id;renderList();loadDetail()});
+ es.onerror=()=>{$("#ctl").textContent="disconnected; retrying…"}}
+connect();
+</script>
+</body>
+</html>

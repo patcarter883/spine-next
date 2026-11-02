@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
+	"github.com/patcarter883/spine-next/internal/ui"
 	"github.com/patcarter883/spine-next/internal/worktree"
 )
 
@@ -485,4 +487,26 @@ func runController(ctx context.Context, args []string) error {
 	defer a.Close()
 	logf("controller running for %s (agent %s, %d parallel); Ctrl-C to stop", a.WT.Primary(), a.Config.Agent, a.Config.Parallel)
 	return a.Controller.Run(ctx)
+}
+
+func runUI(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
+	repo := fs.String("repo", ".", "repository")
+	addr := fs.String("addr", "127.0.0.1:8765", "listen address (loopback by default: the UI has no authentication)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	st, err := openRead(ctx, *repo)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	db, cd, _ := app.DBPath(*repo)
+	srv := &http.Server{Addr: *addr, Handler: (&ui.Server{Store: st, InboxDir: inbox.Dir(cd), Running: func() bool { return storage.IsLocked(db) }}).Handler()}
+	go func() { <-ctx.Done(); srv.Close() }()
+	fmt.Printf("spine ui on http://%s\n", *addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }

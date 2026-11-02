@@ -43,6 +43,7 @@ Other commands:
 | `spine approve ID` | Integrate a task submitted with `--require-approval`. |
 | `spine retry ID` | Give an escalated or failed task one more fresh attempt. |
 | `spine cancel ID` | Stop the agent and release the worktree. |
+| `spine ui` | A web dashboard on `http://127.0.0.1:8765`, loopback only because it has no auth. It shows tasks, gate results and timelines, and can approve, retry or cancel. Pages update live over SSE. It reads the database read-only; commands go through the same inbox as the CLI. |
 | `spine controller` | Run the controller in the foreground. It reconciles every task and resumes after a crash or `kill -9`. |
 | `spine recover` | Repair state after a crash. |
 | `spine gc` | Checkpoint the SQLite WAL. |
@@ -55,7 +56,7 @@ What the controller guarantees:
 - **Failures escalate rather than loop.** Budgets (attempts, rounds, wall clock, tokens) are enforced as a closed set of legal supervisor actions; when none is left, the task escalates to you with its worktree kept.
 - **Your checkout is never touched mid-edit.** If `main` is checked out with uncommitted changes to tracked files, integration waits instead of overwriting them.
 
-## Status: MVP (M0–M2 complete; M3 LLM supervisor and M4 UI not started)
+## Status: MVP (M0–M2 complete, plus the M4 dashboard; M3 LLM supervisor not started)
 
 ### M2: controller, ACP agent runner, CLI
 

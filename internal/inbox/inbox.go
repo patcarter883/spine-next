@@ -129,6 +129,58 @@ func Drain(dir string, fn func(Command) error) error {
 	return nil
 }
 
+// Entry is a pending command file.
+type Entry struct {
+	Path string
+	Command
+}
+
+// List returns pending commands in submission order. Unparseable files are
+// moved to dir/rejected.
+func List(dir string) ([]Entry, error) {
+	ents, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") && !strings.HasPrefix(e.Name(), ".") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	var out []Entry
+	for _, n := range names {
+		p := filepath.Join(dir, n)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var c Command
+		if err := json.Unmarshal(b, &c); err != nil {
+			reject(dir, p, err)
+			continue
+		}
+		out = append(out, Entry{Path: p, Command: c})
+	}
+	return out, nil
+}
+
+// Done removes an applied command.
+func Done(path string) error {
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// Reject moves a command that cannot apply to dir/rejected with the reason.
+func Reject(path string, why error) { reject(filepath.Dir(path), path, why) }
+
 // Permanent wraps an error that retrying cannot fix.
 type Permanent struct{ Err error }
 

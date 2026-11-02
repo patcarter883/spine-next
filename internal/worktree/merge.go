@@ -74,6 +74,14 @@ type mergeIntent struct {
 // tracked files; after the ref moves, its index and files are moved forward
 // with a two-tree read-tree, exactly as a fast-forward checkout would.
 func (m *Manager) Merge(ctx context.Context, snap *Snapshot, baseRef, msg string) (*MergeResult, error) {
+	return m.MergeAt(ctx, snap, baseRef, "", msg)
+}
+
+// MergeAt is Merge, but it fails with ErrBaseMoved unless baseRef is at
+// expectTip when the merge is computed (empty = any tip). The reconciler
+// passes the tip its verdict was computed against, so the tree that lands is
+// exactly the tree that was gated.
+func (m *Manager) MergeAt(ctx context.Context, snap *Snapshot, baseRef, expectTip, msg string) (*MergeResult, error) {
 	if !strings.HasPrefix(baseRef, "refs/") {
 		return nil, fmt.Errorf("worktree: base ref %q must be a full ref name", baseRef)
 	}
@@ -89,6 +97,9 @@ func (m *Manager) Merge(ctx context.Context, snap *Snapshot, baseRef, msg string
 	}
 	if !ok {
 		return nil, fmt.Errorf("worktree: base ref %q does not exist", baseRef)
+	}
+	if expectTip != "" && old != expectTip {
+		return nil, ErrBaseMoved
 	}
 	res, err := m.preflightAt(ctx, snap.CommitOID, old)
 	if err != nil {
@@ -214,4 +225,33 @@ func (m *Manager) rescueCheckout(ctx context.Context, checkout string) (string, 
 	ref := fmt.Sprintf("%s%d", RescueRefPrefix, time.Now().UnixNano())
 	_, err = m.git(ctx, m.primary, nil, "update-ref", ref, commit, "")
 	return ref, err
+}
+
+// ProposedCommit writes (but does not reference) the commit Merge would
+// create for snap on top of tip, so the gate engine can evaluate the merge
+// result before integration (RFC §4.7). It fails with ErrConflict if the
+// merge is not clean. The object is unreferenced until a Merge writes the
+// same tree; gc may prune it later, which is harmless.
+func (m *Manager) ProposedCommit(ctx context.Context, snap *Snapshot, tip, msg string) (string, *MergeResult, error) {
+	res, err := m.preflightAt(ctx, snap.CommitOID, tip)
+	if err != nil {
+		return "", nil, err
+	}
+	if !res.Clean {
+		return "", res, ErrConflict
+	}
+	c, err := m.git1(ctx, m.primary, "commit-tree", res.ResultTree, "-p", tip, "-m", msg)
+	return c, res, err
+}
+
+// ResolveCommit returns the commit rev points at in the primary repository.
+func (m *Manager) ResolveCommit(ctx context.Context, rev string) (string, error) {
+	oid, ok, err := m.revParse(ctx, m.primary, rev+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("worktree: %q does not resolve to a commit", rev)
+	}
+	return oid, nil
 }

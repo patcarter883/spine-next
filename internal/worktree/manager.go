@@ -228,3 +228,10 @@ func validateTask(task string, attempt int) error {
 	}
 	return nil
 }
+
+// PrimaryOf returns the primary worktree (main checkout) of the repository
+// containing repoDir, without constructing a Manager.
+func PrimaryOf(ctx context.Context, repoDir string) (string, error) {
+	m := &Manager{cfg: Config{RepoDir: repoDir, GitTimeout: time.Minute, Identity: Identity{Name: "spine", Email: "spine@localhost"}}}
+	return m.primaryWorktree(ctx)
+}

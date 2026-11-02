@@ -1,9 +1,10 @@
-// Command spine is the Spine v2 CLI. M0 ships the operational commands:
+// Command spine is the Spine v2 CLI.
 //
-//	spine doctor  [--repo DIR]   check environment, store and repository invariants
-//	spine recover [--repo DIR]   repair state after a crash (what a controller runs at boot)
-//	spine gc      [--repo DIR]   checkpoint the SQLite WAL
-//	spine version
+//	spine run "intent" [flags]   submit a task (runs a controller inline if none is running)
+//	spine controller             run the controller until interrupted
+//	spine status ID | list | logs ID
+//	spine approve ID | retry ID | cancel ID
+//	spine doctor | recover | gc | version
 package main
 
 import (
@@ -15,23 +16,42 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/patcarter883/spine-next/internal/app"
 	"github.com/patcarter883/spine-next/internal/doctor"
+	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
 	"github.com/patcarter883/spine-next/internal/worktree"
 )
 
-var version = "0.0.0-m0"
+var version = "0.1.0-mvp"
 
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
 	}
+	app.Version = version
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	cmd, args := os.Args[1], os.Args[2:]
 	var err error
 	switch cmd {
+	case "run":
+		err = runRun(ctx, args)
+	case "controller":
+		err = runController(ctx, args)
+	case "status":
+		err = runStatus(ctx, args)
+	case "list", "ls":
+		err = runList(ctx, args)
+	case "logs":
+		err = runLogs(ctx, args)
+	case "approve":
+		err = runCommand(ctx, inbox.Approve, args)
+	case "retry":
+		err = runCommand(ctx, inbox.Retry, args)
+	case "cancel":
+		err = runCommand(ctx, inbox.Cancel, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "recover":
@@ -57,6 +77,14 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: spine <command> [flags]
 
 commands:
+  run         submit a task: spine run [--scope GLOB]... [--base BRANCH] [--require-approval] "intent"
+              (runs a controller inline until the task finishes if none is running)
+  controller  run the controller for this repository until interrupted
+  status ID   show a task            list [--all]   list tasks
+  logs ID     show a task's events (-f to follow)
+  approve ID  integrate a task held for approval
+  retry ID    give an escalated or failed task another attempt
+  cancel ID   stop a task and release its worktree
   doctor    check environment, store and repository invariants
   recover   repair state after a crash
   gc        checkpoint the SQLite WAL

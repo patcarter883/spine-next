@@ -146,3 +146,18 @@ func normalizeYAML(v map[string]any) map[string]any {
 	json.Unmarshal(b, &out)
 	return out
 }
+
+// DefaultConfig is used when a repository has no gates file and the task
+// names no acceptance gates: the change must parse (when tree-sitter is
+// available), stay in scope and not be empty.
+func DefaultConfig(parseAvailable bool) Config {
+	c := Config{Gates: map[string]api.GateRef{
+		"scope":    {Name: "scope", Tool: "diff.scope", Policy: api.Absolute},
+		"nonempty": {Name: "nonempty", Tool: "diff.nonempty", Policy: api.Absolute},
+	}, Order: []string{"scope", "nonempty"}}
+	if parseAvailable {
+		c.Gates["parse"] = api.GateRef{Name: "parse", Tool: "ts.parse", Policy: api.Absolute}
+		c.Order = append([]string{"parse"}, c.Order...)
+	}
+	return c
+}

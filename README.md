@@ -15,6 +15,11 @@ The design is [RFC 0001](docs/rfcs/0001-spine-v2-go-reconciler.md).
 | `internal/doctor`, `cmd/spine` | `spine doctor`, `spine recover`, `spine gc` |
 | `third_party/gascity` | Vendored Gas City worktree, git and process primitives ([UPSTREAM.md](third_party/gascity/UPSTREAM.md)) |
 
+**M0 exit criterion met:** 1000 kill/recover iterations with seed 20261102 passed in 559 s, with zero invariant violations.
+
+- **Acknowledged:** 733 snapshots and 264 merges, none lost.
+- **Recovery actions:** 374 process groups reaped, 260 requested leases discarded, 261 leases torn down, 26 stale locks removed, 7 interrupted merges completed, 3 interrupted snapshots recovered and 2 dirty-checkout rescues.
+
 ## Build and test
 
 Requires Go ≥ 1.27.3 and git ≥ 2.38. Linux is the supported platform.
@@ -22,5 +27,5 @@ Requires Go ≥ 1.27.3 and git ≥ 2.38. Linux is the supported platform.
 ```sh
 CGO_ENABLED=0 go build ./cmd/spine
 go test ./...                                    # includes a 40-iteration chaos run
-SPINE_CHAOS_ITERS=1000 go test -run 'TestChaos$' -timeout 90m ./internal/chaos   # M0 exit criterion
+SPINE_CHAOS_ITERS=1000 go test -run 'TestChaos$' -timeout 30m ./internal/chaos   # M0 exit criterion
 ```

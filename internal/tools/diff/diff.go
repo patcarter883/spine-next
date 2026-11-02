@@ -106,7 +106,8 @@ func (Stats) Run(ctx context.Context, inv tools.Invocation) (tools.Result, error
 // - diff.nonempty -
 
 // NonEmpty fails when the snapshot changes nothing against its merge base
-// with base: a task cannot complete by doing nothing (RFC §5.1).
+// with base (no commits, or commits that net to no change): a task cannot
+// complete by doing nothing (RFC §5.1).
 type NonEmpty struct{}
 
 func (NonEmpty) Spec() tools.Spec {
@@ -115,28 +116,16 @@ func (NonEmpty) Spec() tools.Spec {
 }
 
 func (NonEmpty) Run(ctx context.Context, inv tools.Invocation) (tools.Result, error) {
+	// No commits beyond the merge base implies an identical tree, so one
+	// tree comparison covers both conditions and keeps the result a function
+	// of (tree, merge-base tree).
 	left, right, err := Sides(ctx, inv)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	r := gitro.Repo{Dir: inv.Repo}
-	if inv.Commit != "" {
-		mb, err := r.MergeBase(ctx, inv.Commit, inv.Base)
-		if err != nil {
-			return tools.Result{}, err
-		}
-		n, err := r.Line(ctx, "rev-list", "--count", mb+".."+inv.Commit)
-		if err != nil {
-			return tools.Result{}, err
-		}
-		if n == "0" {
-			return tools.Result{ExitCode: 1, Diagnostics: []tools.Diagnostic{
-				diag(tools.Error, "diff.nonempty", "NoCommits", "", "snapshot has no commits beyond its merge base with base")}}, nil
-		}
-	}
 	if left == right {
 		return tools.Result{ExitCode: 1, Diagnostics: []tools.Diagnostic{
-			diag(tools.Error, "diff.nonempty", "NoChange", "", "snapshot tree is identical to its merge base with base")}}, nil
+			diag(tools.Error, "diff.nonempty", "NoChange", "", "snapshot changes nothing against its merge base with base")}}, nil
 	}
 	return tools.Result{}, nil
 }

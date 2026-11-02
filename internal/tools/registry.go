@@ -190,7 +190,10 @@ func (r *Registry) key(ctx context.Context, e *entry, inv Invocation) (CacheKey,
 	field(e.spec.Name)
 	field(e.spec.Version)
 	field(inv.Tree)
-	if e.spec.UsesBase {
+	if e.spec.UsesBase && inv.BaseKey != "" {
+		field("treekey")
+		field(inv.BaseKey)
+	} else if e.spec.UsesBase {
 		field(inv.Base)
 		field(inv.Commit)
 	} else {

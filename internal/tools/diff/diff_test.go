@@ -84,7 +84,7 @@ func TestStatsAndNonEmpty(t *testing.T) {
 	baseTree := git(t, f.repo, "rev-parse", f.base+"^{tree}")
 	empty := tools.Invocation{Repo: f.repo, Tree: baseTree, Commit: f.base, Base: f.base}
 	r, err = reg.Invoke(ctx, "diff.nonempty", empty)
-	if err != nil || r.ExitCode != 1 || r.Diagnostics[0].Code != "NoCommits" {
+	if err != nil || r.ExitCode != 1 || r.Diagnostics[0].Code != "NoChange" {
 		t.Fatalf("nonempty on base: %+v %v", r, err)
 	}
 	// A commit that reverts to the base tree: commits exist, change does not.

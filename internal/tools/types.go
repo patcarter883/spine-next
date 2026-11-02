@@ -68,6 +68,11 @@ type Invocation struct {
 	Commit string
 	// Base is the base commit OID the change is measured against.
 	Base string
+	// BaseKey, when set, replaces Base and Commit in the cache key of
+	// UsesBase tools. The gate engine sets it to "<merge-base tree>
+	// <base tree>": base-dependent results are functions of those trees and
+	// Tree, so identical content under different commits shares results.
+	BaseKey string
 	// Dir is a directory whose content is exactly Tree, for NeedsDir tools.
 	// If empty, Materialize is called to obtain one, only on a cache miss.
 	Dir         string

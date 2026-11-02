@@ -113,7 +113,16 @@ Verified by hand with the built binary:
 - `spine run` against a scratch repository.
 - `kill -9` of a running `spine controller` mid-agent-run. The agent died with it via Pdeathsig, and a new controller recorded the crash, ran a repair round, gated and integrated.
 
-**Not yet verified:** a live run with the real `claude-agent-acp` adapter. Starting it was blocked in the build environment because it would use that session's Claude credentials. The client follows the adapter's v1 schema and has been checked against a protocol-faithful fake. `spine doctor --agent` performs the real handshake (`initialize` and `session/new`, no prompt and no tokens) on your machine.
+**Verified live with the real adapter** (`@agentclientprotocol/claude-agent-acp` 0.99.1, Claude Code over ACP v1):
+
+- `spine doctor --agent` performed the real handshake. It reported ACP v1 with modes `default, acceptEdits, plan, auto`.
+- `spine run --scope '*.go' "Add a function Goodbye ... with a table-driven test"` ran on a scratch Go repository with gates parse, scope, nonempty, build, unit (baseline) and api.
+  - Claude Code edited the worktree and ran `go build`/`go test` under a permission Spine allowed because it stayed inside the worktree. It ended its turn after 56k tokens.
+  - Every gate passed, and the change landed on `main` through CAS.
+  - The squashed commit adds `Goodbye` and a passing table-driven test.
+  - The lease worktree was removed.
+
+The M3 A/B comparison of the LLM and rule supervisors on the corpus has not been run yet.
 
 ### Deviations from RFC 0001, decided while building M2
 

@@ -20,6 +20,7 @@ jobs:
       - run: pip install pytest ruff
       - run: npm install -g typescript@6 eslint@10
       - run: php --version && git version
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       # The pure-Go build must keep working: tree-sitter tools report
       # ErrUnavailable without CGO (RFC §8.1).

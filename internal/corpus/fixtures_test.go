@@ -82,9 +82,9 @@ var pythonFixture = fixture{
 		"pkg/__init__.py":   "",
 		"pkg/core.py":       "def area(r):\n    return 3.14159 * r * r\n\n\ndef _helper():\n    return 1\n",
 		// Pre-existing debt: an unused import (F401) and a failing test.
-		"pkg/legacy.py":       "import os\n\nVALUE = 1\n",
-		"tests/__init__.py":   "",
-		"tests/test_core.py":  "from pkg.core import area\n\n\ndef test_area():\n    assert round(area(1), 2) == 3.14\n\n\ndef test_legacy():\n    assert False, 'legacy'\n",
+		"pkg/legacy.py":      "import os\n\nVALUE = 1\n",
+		"tests/__init__.py":  "",
+		"tests/test_core.py": "from pkg.core import area\n\n\ndef test_area():\n    assert round(area(1), 2) == 3.14\n\n\ndef test_legacy():\n    assert False, 'legacy'\n",
 	},
 	tasks: []task{
 		{name: "good", edit: map[string]string{

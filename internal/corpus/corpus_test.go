@@ -200,4 +200,3 @@ func firstLine(s string) string {
 	l, _, _ := strings.Cut(s, "\n")
 	return l
 }
-

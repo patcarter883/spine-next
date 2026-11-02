@@ -166,17 +166,26 @@ func TestChaos(t *testing.T) {
 		for _, l := range rep.LocksReported {
 			v = append(v, "lock left in place: "+l)
 		}
+		// Batched lookups: per-ref git spawns made each iteration's check
+		// grow with history, and 1000 iterations quadratic.
+		refOID := map[string]string{}
+		for _, line := range strings.Split(git(t, repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/spine/snap/"), "\n") {
+			if f := strings.Fields(line); len(f) == 2 {
+				refOID[f[0]] = f[1]
+			}
+		}
+		onMain := map[string]bool{}
+		for _, c := range strings.Fields(git(t, repo, "rev-list", "refs/heads/main")) {
+			onMain[c] = true
+		}
 		acked.Lock()
 		for ref, commit := range acked.snaps {
-			cmd := osexec.Command("git", "rev-parse", "--verify", "-q", ref)
-			cmd.Dir = repo
-			got, _ := cmd.Output()
-			if strings.TrimSpace(string(got)) != commit {
-				v = append(v, fmt.Sprintf("acknowledged snapshot %s lost (want %s, got %q)", ref, commit, strings.TrimSpace(string(got))))
+			if got := refOID[ref]; got != commit {
+				v = append(v, fmt.Sprintf("acknowledged snapshot %s lost (want %s, got %q)", ref, commit, got))
 			}
 		}
 		for _, c := range acked.merges {
-			if !gitOK(repo, "merge-base", "--is-ancestor", c, "refs/heads/main") {
+			if !onMain[c] {
 				v = append(v, "acknowledged merge "+c+" not in main")
 			}
 		}
@@ -192,6 +201,9 @@ func TestChaos(t *testing.T) {
 			t.Fatalf("iteration %d (seed %d): invariants violated:\n  %s\nrecovery report: %+v", i, seed, strings.Join(v, "\n  "), rep)
 		}
 		st.Close()
+		if (i+1)%50 == 0 {
+			t.Logf("iteration %d ok (%d snapshots, %d merges acknowledged)", i+1, len(acked.snaps), len(acked.merges))
+		}
 	}
 	acked.Lock()
 	t.Logf("acknowledged: %d snapshots, %d merges", len(acked.snaps), len(acked.merges))

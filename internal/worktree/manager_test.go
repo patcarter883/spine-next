@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -398,4 +399,28 @@ func TestRecoverBrokenCheckout(t *testing.T) {
 	if rep.LeasesDiscarded != 1 || rep.LeasesTornDown != 1 {
 		t.Fatalf("report %+v", rep)
 	}
+}
+
+// `git worktree add` locks its new entry while initializing and `prune` skips
+// locked entries, so a kill mid-add strands one (found by the chaos harness).
+func TestRecoverPurgesInitializingRegistration(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	base := run(t, f.repo, "rev-parse", "main")
+	for i, withGitdir := range []bool{true, false} {
+		task := fmt.Sprintf("i%d", i)
+		l := Lease{TaskID: task, Attempt: 1, Path: f.m.LeasePath(task, 1), Branch: LeaseBranch(task, 1),
+			BaseOID: base, State: storage.LeaseRequested}
+		_ = f.st.PutLease(ctx, l)
+		entry := filepath.Join(f.m.CommonDir(), "worktrees", filepath.Base(l.Path))
+		write(t, filepath.Join(entry, "locked"), "initializing")
+		if withGitdir {
+			write(t, filepath.Join(entry, "gitdir"), filepath.Join(l.Path, ".git")+"\n")
+			write(t, filepath.Join(entry, "HEAD"), "")
+		}
+	}
+	if rep, err := f.m.Recover(ctx); err != nil || rep.LeasesDiscarded != 2 {
+		t.Fatalf("recover: %v %+v", err, rep)
+	}
+	f.healthy()
 }

@@ -120,6 +120,7 @@ func (m *Manager) discardRequested(ctx context.Context, l Lease) error {
 	if _, statErr := os.Stat(l.Path); statErr == nil {
 		errs = append(errs, os.RemoveAll(l.Path))
 	}
+	errs = append(errs, m.purgeRegistration(l.Path))
 	if oid, ok, err := m.revParse(ctx, m.primary, "refs/heads/"+l.Branch); err != nil {
 		errs = append(errs, err)
 	} else if ok && oid == l.BaseOID {
@@ -164,6 +165,46 @@ func (m *Manager) registered(ctx context.Context) (map[string]string, error) {
 		}
 	}
 	return res, nil
+}
+
+// purgeRegistration deletes $GIT_COMMON_DIR/worktrees/<id> entries left for
+// path by an interrupted `git worktree add` or `remove`. `git worktree add`
+// locks a new entry ("initializing") until it finishes, and `git worktree
+// prune` skips locked entries, so a kill mid-add leaves an entry prune never
+// clears (found by the chaos harness). Callers hold the ref lock, and run only
+// after Recover has killed orphans, so an initializing entry cannot be live.
+func (m *Manager) purgeRegistration(path string) error {
+	dir := filepath.Join(m.commonDir, "worktrees")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	base := filepath.Base(path)
+	var errs []error
+	for _, e := range entries {
+		entry := filepath.Join(dir, e.Name())
+		if b, err := os.ReadFile(filepath.Join(entry, "gitdir")); err == nil {
+			if filepath.Dir(strings.TrimSpace(string(b))) == path {
+				errs = append(errs, os.RemoveAll(entry))
+			}
+			continue
+		}
+		// No gitdir file yet: an add that died before writing it. Git names
+		// the entry after the path's basename, plus digits on collision.
+		rest, ok := strings.CutPrefix(e.Name(), base)
+		if !ok || strings.Trim(rest, "0123456789") != "" {
+			continue
+		}
+		// The lock reason is a translated string (_("initializing") in
+		// builtin/worktree.c), so presence of the file is what counts.
+		if _, err := os.Stat(filepath.Join(entry, "locked")); err == nil {
+			errs = append(errs, os.RemoveAll(entry))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // validCheckout reports whether path is a usable linked worktree: its .git

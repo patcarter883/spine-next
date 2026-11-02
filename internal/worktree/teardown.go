@@ -98,6 +98,9 @@ func (m *Manager) teardownLocked(ctx context.Context, l *Lease) error {
 			return err
 		}
 	}
+	if err := m.withRefs(ctx, func() error { return m.purgeRegistration(cur.Path) }); err != nil {
+		return err
+	}
 
 	if err := m.withRefs(ctx, func() error {
 		if oid, ok, err := m.revParse(ctx, m.primary, "refs/heads/"+cur.Branch); err != nil {

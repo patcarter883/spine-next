@@ -43,7 +43,6 @@ type RecoveryReport struct {
 func (m *Manager) Recover(ctx context.Context) (RecoveryReport, error) {
 	var rep RecoveryReport
 	var errs []error
-	boot := time.Now()
 	st := m.cfg.Store
 
 	pending, err := st.PendingOps(ctx)
@@ -73,6 +72,10 @@ func (m *Manager) Recover(ctx context.Context) (RecoveryReport, error) {
 	// is found by its cwd: anything running inside Root is Spine's.
 	rep.StrayProcsKilled = append(rep.StrayProcsKilled, killProcsUnder(m.cfg.Root)...)
 	waitGone(rep.StrayProcsKilled, 5*time.Second)
+	// Only now is nothing of ours still running: any lock older than this
+	// instant belongs to a dead process. (Taking it earlier let an orphaned
+	// agent's git create a lock after the cut-off; found by the chaos harness.)
+	boot := time.Now()
 
 	// 2. Stale locks and temporary indexes.
 	syncing := map[string]bool{} // git dirs of checkouts with an unfinished sync

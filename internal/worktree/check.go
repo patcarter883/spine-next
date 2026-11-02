@@ -103,16 +103,27 @@ func (m *Manager) Check(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, s := range snaps {
-		oid, ok, err := m.revParse(ctx, m.primary, s.Ref)
-		if err != nil {
-			return nil, err
+	// One for-each-ref instead of two rev-parses per snapshot: snapshot refs
+	// accumulate, and per-ref process spawns made Check quadratic over a
+	// repository's lifetime.
+	out, err := m.git(ctx, m.primary, nil, "for-each-ref", "--format=%(refname) %(objectname) %(tree)", SnapshotRefPrefix)
+	if err != nil {
+		return nil, err
+	}
+	type refInfo struct{ oid, tree string }
+	refs := make(map[string]refInfo)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if f := strings.Fields(line); len(f) == 3 {
+			refs[f[0]] = refInfo{f[1], f[2]}
 		}
-		if !ok || oid != s.CommitOID {
-			add("snapshot %s: ref is %q, recorded %s", s.Ref, oid, s.CommitOID)
+	}
+	for _, s := range snaps {
+		r, ok := refs[s.Ref]
+		if !ok || r.oid != s.CommitOID {
+			add("snapshot %s: ref is %q, recorded %s", s.Ref, r.oid, s.CommitOID)
 			continue
 		}
-		if tree, err := m.git1(ctx, m.primary, "rev-parse", s.CommitOID+"^{tree}"); err != nil || tree != s.TreeOID {
+		if r.tree != s.TreeOID {
 			add("snapshot %s: tree mismatch", s.Ref)
 		}
 	}

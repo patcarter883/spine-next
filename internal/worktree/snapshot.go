@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -124,4 +125,50 @@ func (m *Manager) Rollback(ctx context.Context, l *Lease, to *Snapshot) error {
 
 func splitLines(s string) []string {
 	return strings.Split(strings.TrimRight(s, "\n"), "\n")
+}
+
+// ErrSnapshotDoesNotApply means a snapshot's change conflicts with the
+// lease's base.
+var ErrSnapshotDoesNotApply = errors.New("worktree: snapshot does not apply to the current base")
+
+// ApplySnapshot replays a snapshot's change (relative to the base its
+// attempt started from) onto a fresh lease of the same task. Unlike
+// Rollback, it keeps changes that landed on the base since: the snapshot's
+// diff is applied with a three-way merge. On a conflict the worktree is
+// reset to the lease base and ErrSnapshotDoesNotApply is returned.
+func (m *Manager) ApplySnapshot(ctx context.Context, l *Lease, to *Snapshot, oldBase string) error {
+	if to.TaskID != l.TaskID {
+		return ErrForeignSnapshot
+	}
+	if !m.isLeasePath(l.Path) {
+		return ErrPrimaryTree
+	}
+	lk, err := m.lockPath(ctx, l.Path)
+	if err != nil {
+		return err
+	}
+	defer lk.release()
+	gitDir, err := m.git1(ctx, l.Path, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return err
+	}
+	patch := filepath.Join(gitDir, "spine-resume.patch")
+	defer os.Remove(patch)
+	if _, err := m.git(ctx, l.Path, nil, "diff", "--binary", "--no-color", "--no-ext-diff", "--output="+patch, oldBase, to.CommitOID); err != nil {
+		return err
+	}
+	if st, err := os.Stat(patch); err == nil && st.Size() == 0 {
+		return nil
+	}
+	_, code, stderr, err := m.gitRC(ctx, l.Path, nil, "apply", "--3way", "--whitespace=nowarn", patch)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		m.git(ctx, l.Path, nil, "read-tree", "--reset", "-u", "HEAD")
+		m.git(ctx, l.Path, nil, "clean", "-fdq")
+		return fmt.Errorf("%w: %s", ErrSnapshotDoesNotApply, strings.TrimSpace(truncate([]byte(stderr), 2000)))
+	}
+	_, err = m.git(ctx, l.Path, nil, "reset", "-q")
+	return err
 }

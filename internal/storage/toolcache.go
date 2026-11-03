@@ -40,3 +40,11 @@ func (s *Store) PruneToolCache(ctx context.Context, cutoff time.Time) (int64, er
 	})
 	return n, err
 }
+
+// ToolCacheStats reports the cache's size and how much is older than cutoff.
+func (s *Store) ToolCacheStats(ctx context.Context, cutoff time.Time) (rows, bytes, oldRows, oldBytes int64, err error) {
+	err = s.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(length(result)),0),
+		coalesce(sum(created_at < ?),0), coalesce(sum(CASE WHEN created_at < ? THEN length(result) ELSE 0 END),0) FROM tool_cache`,
+		cutoff.Unix(), cutoff.Unix()).Scan(&rows, &bytes, &oldRows, &oldBytes)
+	return
+}

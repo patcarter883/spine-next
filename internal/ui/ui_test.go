@@ -176,7 +176,7 @@ func TestCreateTask(t *testing.T) {
 		t.Fatalf("%d %v", r.StatusCode, m)
 	}
 	es, _ := inbox.List(a.inbox)
-	if len(es) != 1 || es[0].Kind != inbox.Submit || string(es[0].Task) != m["id"] || es[0].By != "ui" {
+	if len(es) != 1 || es[0].Kind != inbox.Submit || string(es[0].Task) != m["id"] || !strings.HasSuffix(es[0].By, "(local)") {
 		t.Fatalf("inbox %+v", es)
 	}
 	sp := es[0].Spec

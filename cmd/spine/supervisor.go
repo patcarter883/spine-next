@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/patcarter883/spine-next/internal/supervisor"
-	"github.com/patcarter883/spine-next/internal/ui"
 )
 
 func runRepos(ctx context.Context, args []string) error {
@@ -78,14 +77,16 @@ func runSupervisor(ctx context.Context, args []string) error {
 		return err
 	}
 	fs := flag.NewFlagSet("supervisor "+sub, flag.ContinueOnError)
-	addr := fs.String("addr", cfg.Addr, "dashboard address (loopback by default: it has no authentication)")
+	addr := fs.String("addr", cfg.Addr, "dashboard address (non-loopback needs users: `spine users add`)")
+	var d dashboardFlags
+	d.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	cfg.Addr = *addr
 	switch sub {
 	case "run":
-		return supervisorRun(ctx, cfg)
+		return supervisorRun(ctx, cfg, d)
 	case "status":
 		return supervisorStatus(ctx, cfg.Addr)
 	case "install":
@@ -99,31 +100,29 @@ type supStatus struct {
 	Limits map[string]any          `json:"limits"`
 }
 
-func supervisorRun(ctx context.Context, cfg supervisor.Config) error {
+func supervisorRun(ctx context.Context, cfg supervisor.Config, d dashboardFlags) error {
 	s := &supervisor.Supervisor{Registry: supervisor.DefaultRegistry(), Config: cfg, Logf: logf}
 	src := &supervisor.UISource{Sup: s}
 	defer src.Close()
-	mux := http.NewServeMux()
-	mux.Handle("/", (&ui.Server{Source: src, Multi: true}).Handler())
-	mux.HandleFunc("GET /api/supervisor", func(w http.ResponseWriter, r *http.Request) {
-		st := supStatus{Repos: s.Status(), Limits: map[string]any{"max_agents": cfg.MaxAgents, "max_gates": cfg.MaxGates}}
+	dash, err := newDashboard(src, true, src, cfg.Addr, d)
+	if err != nil {
+		return err
+	}
+	dash.Extra = map[string]http.HandlerFunc{"GET /api/supervisor": func(w http.ResponseWriter, r *http.Request) {
+		st := supStatus{Repos: s.Status(), Limits: map[string]any{"max_agents": s.Config.MaxAgents, "max_gates": s.Config.MaxGates}}
 		if l := s.Limits(); l != nil {
-			cur, _ := l.Usage()
-			st.Limits["in_use"] = cur
+			st.Limits["in_use"] = l.State().InUse
+			st.Limits["waiting"] = len(l.State().Waiting)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(st)
-	})
-	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
+	}}
 	errc := make(chan error, 1)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errc <- err
-		}
-	}()
-	defer srv.Close()
+	dctx, stopDash := context.WithCancel(ctx)
+	defer stopDash()
+	go func() { errc <- serveDashboard(dctx, dash, cfg.Addr, d, nil) }()
 	repos, _ := s.Registry.Load()
-	logf("supervisor: %d repositories, max %d agents / %d gates; dashboard http://%s", len(repos), cfg.MaxAgents, cfg.MaxGates, cfg.Addr)
+	logf("supervisor: %d repositories, max %d agents / %d gates", len(repos), cfg.MaxAgents, cfg.MaxGates)
 	done := make(chan error, 1)
 	go func() { done <- s.Run(ctx) }()
 	select {
@@ -133,6 +132,9 @@ func supervisorRun(ctx context.Context, cfg supervisor.Config) error {
 		}
 		return err
 	case err := <-errc:
+		if err == nil {
+			return <-done
+		}
 		return fmt.Errorf("dashboard: %w", err)
 	}
 }
@@ -141,11 +143,17 @@ func supervisorStatus(ctx context.Context, addr string) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", "http://"+addr+"/api/supervisor", nil)
+	if tok := os.Getenv("SPINE_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("no supervisor answering at %s (start one with `spine supervisor`)", addr)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("the dashboard requires sign-in: set SPINE_TOKEN to a user's token")
+	}
 	var st supStatus
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		return err

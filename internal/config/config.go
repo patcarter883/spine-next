@@ -97,7 +97,7 @@ type raw struct {
 func Default() Config {
 	return Config{
 		Agent:      "claude",
-		Adapters:   map[string]agent.Adapter{"claude": agent.ClaudeAdapter()},
+		Adapters:   map[string]agent.Adapter{"claude": agent.ClaudeAdapter(), "pi": agent.PiAdapter()},
 		Parallel:   4,
 		Base:       "refs/heads/main",
 		Budget:     api.Budget{}.WithDefaults(),
@@ -148,7 +148,13 @@ func Parse(b []byte) (Config, error) {
 		if a.Protocol == "pi-rpc" && len(a.Argv) == 0 {
 			a.Argv = []string{"pi"}
 		}
-		if base, ok := c.Adapters[name]; ok { // overlay on a built-in
+		if base, ok := c.Adapters[name]; ok && (a.Protocol == "" || a.Protocol == base.Protocol) { // overlay on a built-in
+			if a.Protocol == "" {
+				a.Protocol = base.Protocol
+			}
+			if a.Version == "" {
+				a.Version = base.Version
+			}
 			if len(a.Argv) == 0 {
 				a.Argv = base.Argv
 			}
@@ -268,7 +274,14 @@ type TaskInput struct {
 	RequireApproval bool          `json:"require_approval"`
 	MaxAttempts     int           `json:"max_attempts"`
 	MaxRounds       int           `json:"max_rounds"`
+	MaxTokens       int64         `json:"max_tokens"`
+	Gates           []string      `json:"gates"`    // subset of the base's gates; empty = all
+	Template        string        `json:"template"` // preset the input came from (recorded on the spec)
 	RunTimeout      time.Duration `json:"-"`
+	// Acceptance is Gates resolved against the base's gates file by the
+	// caller (NewSpec has no repository access).
+	Acceptance []api.GateRef `json:"-"`
+	CreatedBy  string        `json:"-"`
 }
 
 // NewSpec builds and validates a task spec from input and this
@@ -315,6 +328,15 @@ func (c Config) NewSpec(in TaskInput) (api.Spec, error) {
 	if in.RunTimeout > 0 {
 		spec.Budget.PerRunTimeout = in.RunTimeout
 	}
+	if in.MaxTokens < 0 {
+		return api.Spec{}, fmt.Errorf("max tokens must not be negative")
+	}
+	if in.MaxTokens > 0 {
+		spec.Budget.MaxTokens = in.MaxTokens
+	}
+	spec.Acceptance = in.Acceptance
+	spec.Template = strings.TrimSpace(in.Template)
+	spec.CreatedBy = in.CreatedBy
 	spec.Escalation.RequireApprovalBeforeMerge = in.RequireApproval
 	return spec, api.ValidateSpec(spec)
 }

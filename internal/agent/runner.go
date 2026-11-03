@@ -81,6 +81,18 @@ func ClaudeAdapter() Adapter {
 		StallTimeout: 10 * time.Minute}
 }
 
+// PiVersion is the Pi release Spine is tested against; the built-in "pi"
+// adapter pins it (Pi ships breaking changes in minor releases).
+const PiVersion = "1.5.0"
+
+// PiAdapter is the built-in Pi adapter (RPC mode, version pinned). It runs
+// on the host unless the configuration gives it a container; `spine doctor`
+// warns about that.
+func PiAdapter() Adapter {
+	return Adapter{Name: "pi", Argv: []string{"pi"}, Protocol: "pi-rpc", Version: PiVersion, Permissions: "worktree",
+		StallTimeout: 15 * time.Minute}
+}
+
 // ProcRunner runs a command inside a lease, recording its process group
 // (worktree.Manager.Run).
 type ProcRunner interface {
@@ -354,7 +366,7 @@ type handler struct {
 func (h *handler) lastMessage() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return trunc(strings.TrimSpace(h.msg.String()), 2000)
+	return truncTail(strings.TrimSpace(h.msg.String()), MaxFinalMessage)
 }
 
 func (h *handler) Notify(ctx context.Context, method string, params json.RawMessage) {
@@ -377,8 +389,12 @@ func (h *handler) Notify(ctx context.Context, method string, params json.RawMess
 			h.msg.Reset()
 			h.msg.WriteString(s[len(s)-8<<10:])
 		}
-		h.msg.WriteString(acp.TextOf(u.Content))
+		txt := acp.TextOf(u.Content)
+		h.msg.WriteString(txt)
 		h.mu.Unlock()
+		if txt != "" {
+			h.emit(Event{Kind: "message", Detail: txt})
+		}
 	case "tool_call":
 		h.emit(Event{Kind: "tool_call", Title: trunc(u.Title, 200), Status: u.Status, Detail: u.Kind})
 	case "tool_call_update":
@@ -492,4 +508,21 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// MaxFinalMessage bounds the agent's final message kept in an outcome.
+const MaxFinalMessage = 8000
+
+// truncTail keeps the last n bytes: an agent's summary comes at the end.
+func truncTail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[len(s)-n:]
+	for i := 0; i < 4 && i < len(s); i++ { // do not start mid-rune
+		if s[i]&0xC0 != 0x80 {
+			return "…" + s[i:]
+		}
+	}
+	return "…" + s
 }

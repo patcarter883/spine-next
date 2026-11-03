@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
+	"os"
+	"strings"
 	"time"
 
 	"github.com/patcarter883/spine-next/internal/api"
@@ -304,4 +305,50 @@ func (s *Store) ListEvents(ctx context.Context, id api.TaskID, after int64, limi
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListEventsByKind returns events of the given kinds at or after since,
+// oldest first, across all tasks (dashboard aggregates).
+func (s *Store) ListEventsByKind(ctx context.Context, since time.Time, limit int, kinds ...string) ([]Event, error) {
+	if limit <= 0 {
+		limit = 100000
+	}
+	q := `SELECT id,task_id,at,kind,data FROM events WHERE at >= ?`
+	args := []any{since.UnixNano()}
+	if len(kinds) > 0 {
+		q += ` AND kind IN (?` + strings.Repeat(",?", len(kinds)-1) + `)`
+		for _, k := range kinds {
+			args = append(args, k)
+		}
+	}
+	q += ` ORDER BY id LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.r.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var tid, data string
+		var at int64
+		if err := rows.Scan(&e.ID, &tid, &at, &e.Kind, &data); err != nil {
+			return nil, err
+		}
+		e.TaskID, e.At, e.Data = api.TaskID(tid), time.Unix(0, at).UTC(), json.RawMessage(data)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// Sizes reports the database and WAL file sizes in bytes.
+func (s *Store) Sizes() (db, wal int64) {
+	if fi, err := os.Stat(s.path); err == nil {
+		db = fi.Size()
+	}
+	if fi, err := os.Stat(s.path + "-wal"); err == nil {
+		wal = fi.Size()
+	}
+	return
 }

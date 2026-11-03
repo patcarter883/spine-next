@@ -18,7 +18,16 @@ type Prompt struct {
 	Acceptance  []string
 	Feedback    []api.Feedback
 	Constraints []string
+	// Plan asks for a task breakdown of Intent (a goal) written to PlanFile,
+	// instead of a code change.
+	Plan bool
+	// Agents and Gates list what a planned task may name (planner only).
+	Agents []string
+	Gates  []string
 }
+
+// PlanFile is where a planner run writes its plan, relative to the worktree.
+const PlanFile = "spine-plan.json"
 
 // MaxFeedbackDiagnostics caps diagnostics per feedback item (top-K).
 const MaxFeedbackDiagnostics = 20
@@ -33,6 +42,9 @@ var DefaultConstraints = []string{
 
 // Render produces the prompt text.
 func (p Prompt) Render() string {
+	if p.Plan {
+		return p.renderPlan()
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "spine-task: %s\nspine-attempt: %d\nspine-round: %d\n\n", p.Task, p.Attempt, p.Round)
 	b.WriteString("# Task\n\n")
@@ -88,6 +100,40 @@ func (p Prompt) Render() string {
 	for _, c := range cs {
 		fmt.Fprintf(&b, "- %s\n", c)
 	}
+	return b.String()
+}
+
+func (p Prompt) renderPlan() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "spine-task: %s\nspine-attempt: %d\nspine-round: %d\nspine-kind: plan\n\n", p.Task, p.Attempt, p.Round)
+	b.WriteString("# Goal\n\n")
+	b.WriteString(strings.TrimSpace(p.Intent))
+	b.WriteString("\n\n# What to do\n\n")
+	b.WriteString("Do not implement the goal. Read the repository and break the goal into small, independently verifiable tasks that coding agents will carry out one each, in isolated worktrees. ")
+	b.WriteString("Each task must be reviewable on its own and leave the repository building and its tests passing. Prefer tasks that touch disjoint files so they can run in parallel; when one task needs another's change, list it in `after`.\n\n")
+	fmt.Fprintf(&b, "Write the plan as JSON to `%s` in the current directory, and change nothing else:\n\n", PlanFile)
+	b.WriteString("```json\n{\n  \"notes\": \"optional: assumptions, risks, what you left out\",\n  \"tasks\": [\n    {\n      \"id\": \"short-kebab-id\",\n      \"title\": \"commit subject, under 72 characters\",\n      \"intent\": \"precise instructions for the coding agent: what to change, where, and how to test it\",\n      \"scope\": [\"path/globs/**\", \"the task may change\"],\n      \"after\": [\"ids of tasks that must land first\"]\n    }\n  ]\n}\n```\n\n")
+	b.WriteString("Rules: ids match `[a-z0-9][a-z0-9-]{0,40}` and are unique; `after` names only ids in this plan; there are no cycles; every task has a scope; 1 to 12 tasks.\n")
+	if len(p.Agents) > 0 {
+		fmt.Fprintf(&b, "A task may set `\"agent\"` to one of: %s (omit it for the default).\n", strings.Join(p.Agents, ", "))
+	}
+	if len(p.Gates) > 0 {
+		fmt.Fprintf(&b, "\n# How tasks are checked\n\nEvery task must pass these gates, read from the base branch:\n")
+		for _, g := range p.Gates {
+			fmt.Fprintf(&b, "- %s\n", g)
+		}
+	}
+	if len(p.Feedback) > 0 {
+		b.WriteString("\n# Problems with your previous plan\n\n")
+		for _, f := range p.Feedback {
+			fmt.Fprintf(&b, "- %s: %s\n", f.Source, f.Hint)
+			for _, d := range f.Diagnostics {
+				fmt.Fprintf(&b, "  - %s\n", d.Message)
+			}
+		}
+	}
+	b.WriteString("\n# Constraints\n\n- Work only inside the current directory.\n- Do not run git commit, git push, git checkout, git reset or git stash.\n")
+	fmt.Fprintf(&b, "- Write only `%s`. When it is written, stop.\n", PlanFile)
 	return b.String()
 }
 

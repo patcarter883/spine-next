@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,6 +48,7 @@ func runRun(ctx context.Context, args []string) error {
 	attempts := fs.Int("max-attempts", 0, "fresh attempts (default: config)")
 	rounds := fs.Int("max-rounds", 0, "patch rounds per attempt (default: config)")
 	timeout := fs.Duration("run-timeout", 0, "timeout per agent run (default: config)")
+	maxTokens := fs.Int64("max-tokens", 0, "token budget for the task (default: config)")
 	var scope, deps multi
 	fs.Var(&scope, "scope", "path glob the task may change (repeatable; default: everything)")
 	fs.Var(&deps, "after", "task id that must integrate first (repeatable)")
@@ -75,7 +75,8 @@ func runRun(ctx context.Context, args []string) error {
 		return err
 	}
 	spec, err := cfg.NewSpec(config.TaskInput{Title: *title, Intent: intent, Base: *base, Scope: scope, After: deps,
-		Agent: *adapter, RequireApproval: *approve, MaxAttempts: *attempts, MaxRounds: *rounds, RunTimeout: *timeout})
+		Agent: *adapter, RequireApproval: *approve, MaxAttempts: *attempts, MaxRounds: *rounds, RunTimeout: *timeout,
+		MaxTokens: *maxTokens, CreatedBy: os.Getenv("USER")})
 	if err != nil {
 		return err
 	}
@@ -422,20 +423,45 @@ func runLogs(ctx context.Context, args []string) error {
 func runCommand(ctx context.Context, kind inbox.Kind, args []string) error {
 	fs := flag.NewFlagSet(string(kind), flag.ContinueOnError)
 	repo := fs.String("repo", ".", "repository")
-	if err := fs.Parse(args); err != nil {
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	cmd := inbox.Command{Kind: kind, By: os.Getenv("USER")}
+	switch kind {
+	case inbox.Hint:
+		if len(pos) < 2 {
+			return fmt.Errorf("hint: spine hint ID \"the bug is in X\"")
+		}
+		cmd.Text = strings.TrimSpace(strings.Join(pos[1:], " "))
+	case inbox.Rollback:
+		if len(pos) != 2 {
+			return fmt.Errorf("rollback: spine rollback ID SNAPSHOT (see `spine status ID`)")
+		}
+		if _, err := fmt.Sscanf(strings.TrimPrefix(pos[1], "#"), "%d", &cmd.Seq); err != nil {
+			return fmt.Errorf("rollback: %q is not a snapshot number", pos[1])
+		}
+	case inbox.Retry:
+		if len(pos) > 1 {
+			cmd.Text = strings.TrimSpace(strings.Join(pos[1:], " "))
+		}
+	default:
+		if len(pos) != 1 {
+			return fmt.Errorf("%s: give a task id", kind)
+		}
+	}
+	if len(pos) == 0 {
 		return fmt.Errorf("%s: give a task id", kind)
 	}
+	cmd.Task = api.TaskID(pos[0])
 	running, _, cd, err := controllerRunning(*repo)
 	if err != nil {
 		return err
 	}
-	if _, err := inbox.Write(inbox.Dir(cd), inbox.Command{Kind: kind, Task: api.TaskID(fs.Arg(0)), By: os.Getenv("USER")}); err != nil {
+	if _, err := inbox.Write(inbox.Dir(cd), cmd); err != nil {
 		return err
 	}
-	fmt.Printf("%s %s: queued\n", kind, fs.Arg(0))
+	fmt.Printf("%s %s: queued\n", kind, pos[0])
 	if !running {
 		fmt.Println("no controller is running; it applies when `spine controller` starts")
 	}
@@ -463,7 +489,9 @@ func runController(ctx context.Context, args []string) error {
 func runUI(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
 	repo := fs.String("repo", ".", "repository")
-	addr := fs.String("addr", "127.0.0.1:8765", "listen address (loopback by default: the UI has no authentication)")
+	addr := fs.String("addr", "127.0.0.1:8765", "listen address (non-loopback needs users: `spine users add`)")
+	var d dashboardFlags
+	d.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -480,13 +508,11 @@ func runUI(ctx context.Context, args []string) error {
 		if storage.IsLocked(db) {
 			state = "running"
 		}
-		return []ui.Repo{{Name: name, Path: primary, State: state, Store: st, InboxDir: inbox.Dir(cd)}}
+		return []ui.Repo{{Name: name, Path: primary, State: state, Store: st, InboxDir: inbox.Dir(cd), CommonDir: cd}}
 	})
-	srv := &http.Server{Addr: *addr, Handler: (&ui.Server{Source: src}).Handler()}
-	go func() { <-ctx.Done(); srv.Close() }()
-	fmt.Printf("spine ui on http://%s\n", *addr)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	s, err := newDashboard(src, false, nil, *addr, d)
+	if err != nil {
 		return err
 	}
-	return nil
+	return serveDashboard(ctx, s, *addr, d, nil)
 }

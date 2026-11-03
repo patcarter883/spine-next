@@ -360,7 +360,7 @@ func (r *Runner) runPi(ctx context.Context, req RunRequest) (api.Outcome, error)
 	last := g.last
 	if last != nil {
 		out.StopReason = last.StopReason
-		out.Message = trunc(strings.TrimSpace(last.text()), 2000)
+		out.Message = truncTail(strings.TrimSpace(last.text()), MaxFinalMessage)
 	}
 	switch {
 	case reason != "":
@@ -537,6 +537,9 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 			case "message_end":
 				if m := ev.Message; m != nil && m.Role == "assistant" {
 					g.last = m
+					if txt := strings.TrimSpace(m.text()); txt != "" {
+						g.emit(Event{Kind: "message", Detail: trunc(txt, 8000)})
+					}
 					if m.Usage != nil {
 						n := g.tokens.Add(m.Usage.TotalTokens)
 						g.cost += m.Usage.Cost.Total

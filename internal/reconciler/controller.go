@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +47,28 @@ type Deps struct {
 	// Repo is this controller's name under a supervisor ("" standalone);
 	// "<Repo>:<task>" dependencies resolve locally.
 	Repo string
+}
+
+// Waiter identifies who is acquiring a Limiter slot (for the dashboard's
+// queue view). Controllers attach it to the context passed to Acquire.
+type Waiter struct {
+	Repo  string     `json:"repo"`
+	Task  api.TaskID `json:"task"`
+	Kind  string     `json:"kind"`
+	Since time.Time  `json:"since"`
+}
+
+type waiterKey struct{}
+
+// WithWaiter attaches w to ctx.
+func WithWaiter(ctx context.Context, w Waiter) context.Context {
+	return context.WithValue(ctx, waiterKey{}, w)
+}
+
+// WaiterFrom returns the waiter attached to ctx.
+func WaiterFrom(ctx context.Context) (Waiter, bool) {
+	w, ok := ctx.Value(waiterKey{}).(Waiter)
+	return w, ok
 }
 
 // Limiter bounds concurrent operations of a kind ("agent", "gate").
@@ -356,7 +380,7 @@ func (c *Controller) start(id api.TaskID, kind string, fn func(ctx context.Conte
 			c.q.Add(id)
 		}()
 		if c.Limits != nil {
-			release, err := c.acquireGlobal(ctx, id, kind)
+			release, err := c.acquireGlobal(WithWaiter(ctx, Waiter{Repo: c.Repo, Task: id, Kind: kind}), id, kind)
 			if err != nil {
 				return // cancelled while queued; the stale Op is cleared on the next reconcile
 			}
@@ -406,6 +430,18 @@ func (c *Controller) acquireSlot(id api.TaskID) bool {
 	return true
 }
 
+// SlotInfo reports the tasks holding one of this repository's worktree
+// slots and the configured parallelism.
+func (c *Controller) SlotInfo() (held []api.TaskID, parallel int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.slots {
+		held = append(held, id)
+	}
+	sort.Slice(held, func(i, j int) bool { return held[i] < held[j] })
+	return held, c.Config.Parallel
+}
+
 func (c *Controller) releaseSlot(id api.TaskID) {
 	c.mu.Lock()
 	delete(c.slots, id)
@@ -422,6 +458,10 @@ func (c *Controller) drainInbox(ctx context.Context) error {
 		return err
 	}
 	for _, e := range es {
+		if e.Task == "" {
+			c.applyRepoCommand(ctx, e)
+			continue
+		}
 		if e.Kind == inbox.Submit {
 			err := c.apply(ctx, e.Command)
 			var pe inbox.Permanent
@@ -529,23 +569,16 @@ func (c *Controller) apply(ctx context.Context, cmd inbox.Command) error {
 			c.releaseSlot(t.ID)
 		}
 	case inbox.Retry:
-		if !t.Status.Phase.Terminal() || t.Status.Phase == api.PhaseIntegrated {
+		if !t.Status.Phase.Terminal() || t.Status.Phase == api.PhaseIntegrated || t.Status.Phase == api.PhasePlanned {
 			return perm(fmt.Errorf("%w: retry %s in phase %s", ErrBadCommand, t.ID, t.Status.Phase))
 		}
-		c.teardown(ctx, t.ID, t.Status.Attempt)
-		spec := t.Spec
-		b := spec.Budget.WithDefaults()
-		if b.MaxAttempts <= t.Status.Attempt {
-			b.MaxAttempts = t.Status.Attempt + 1
+		var hints []api.Hint
+		if txt := strings.TrimSpace(cmd.Text); txt != "" {
+			hints = append(hints, api.Hint{Text: trunc(txt, MaxHint), By: cmd.By, At: cmd.At})
 		}
-		spec.Budget = b
-		_, err = c.Store.UpdateSpec(ctx, t.ID, 0, spec, func(s *api.Status) {
-			s.Phase, s.Reason, s.Message = api.PhasePending, "Retry", ""
-			s.PatchRound, s.Worktree, s.Op, s.NextFeedback = 0, nil, nil, nil
-			s.StartedAt = time.Now().UTC()
-		})
+		err = c.restart(ctx, &t, t.Spec, "Retry", func(s *api.Status) { s.Hints = append(s.Hints, hints...) })
 	default:
-		return perm(fmt.Errorf("unknown command %q", cmd.Kind))
+		err = c.applyMore(ctx, &t, cmd)
 	}
 	if err != nil {
 		return err

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spine</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header id="top">
+  <h1><a href="#/tasks">Spine</a></h1>
+  <select id="repoSel" hidden aria-label="Repository"></select>
+  <nav id="nav" aria-label="Views"></nav>
+  <span id="ctl">connecting…</span>
+  <button id="bell" class="iconbtn" title="Notifications" aria-label="Notifications" hidden>🔔<span id="bellN" hidden></span></button>
+  <span id="who"></span>
+  <button id="newBtn" class="newbtn">+ New task</button>
+</header>
+<div id="banner" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="view"></div>
+<div id="dialog" hidden><div class="dlg" role="dialog" aria-modal="true"><div id="dlgBody"></div></div></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

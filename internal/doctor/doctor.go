@@ -27,9 +27,9 @@ const (
 
 // Finding is one check result.
 type Finding struct {
-	Level   Level
-	Check   string
-	Message string
+	Level   Level  `json:"level"`
+	Check   string `json:"check"`
+	Message string `json:"message"`
 }
 
 // MinGit is the oldest git with `merge-tree --write-tree` (RFC §6.2).

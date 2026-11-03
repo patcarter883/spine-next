@@ -12,6 +12,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/gate"
+	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
 	"github.com/patcarter883/spine-next/internal/worktree"
 )
@@ -50,6 +51,9 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 		return c.provision(ctx, &t, b)
 
 	case api.PhaseProvisioned:
+		if !c.acquireSlot(t.ID) { // resumed by a person after its slot was released
+			return Result{RequeueAfter: 2 * time.Second}, nil
+		}
 		return c.startAgent(ctx, &t, b, t.Status.PatchRound, t.Status.NextFeedback)
 
 	case api.PhaseWorking:
@@ -67,6 +71,9 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 		if out.Reason != api.OutcomeCompleted {
 			// Do not gate a half-written tree; let the supervisor choose.
 			return c.decide(ctx, &t, b, snap, nil, false)
+		}
+		if t.Spec.Kind == api.KindPlan {
+			return c.collectPlan(ctx, &t, b)
 		}
 		return c.startGate(ctx, &t, snap, "", "", false)
 
@@ -143,6 +150,19 @@ func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (
 	if t.Status.Attempt >= b.MaxAttempts {
 		return c.finish(ctx, t, api.PhaseFailed, "AttemptsExhausted", fmt.Sprintf("%d attempts", t.Status.Attempt))
 	}
+	if p, paused := inbox.Paused(c.InboxDir); paused {
+		msg := "repository paused"
+		if p.By != "" {
+			msg += " by " + p.By
+		}
+		if t.Status.Message != msg {
+			c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
+				s.Message = msg
+				return nil
+			})
+		}
+		return Result{RequeueAfter: 3 * time.Second}, nil
+	}
 	if !c.acquireSlot(t.ID) {
 		return Result{RequeueAfter: 2 * time.Second}, nil
 	}
@@ -158,7 +178,22 @@ func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (
 	if err != nil {
 		return Result{}, err
 	}
+	if from := t.Status.ResumeFrom; from != nil {
+		old, err := c.Store.GetLease(ctx, string(t.ID), from.Attempt)
+		if err != nil {
+			return c.escalate(ctx, t, "RollbackFailed", fmt.Sprintf("snapshot #%d: base of attempt %d unknown: %v", from.Seq, from.Attempt, err))
+		}
+		if err := c.WT.ApplySnapshot(ctx, lease, wsnap(t.ID, from), old.BaseOID); err != nil {
+			if errors.Is(err, worktree.ErrSnapshotDoesNotApply) {
+				c.teardown(ctx, t.ID, attempt)
+				return c.escalate(ctx, t, "RollbackConflict", trunc(err.Error(), 1000))
+			}
+			return Result{}, err
+		}
+		c.event(t.ID, "resumed_from_snapshot", map[string]any{"seq": from.Seq, "label": from.Label, "attempt": attempt})
+	}
 	_, err = c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceWorktree, func(s *api.Status) error {
+		s.ResumeFrom = nil
 		s.Attempt = attempt
 		s.PatchRound = 0
 		s.Worktree = &api.WorktreeRef{Path: lease.Path, Branch: lease.Branch, BaseOID: lease.BaseOID, AttemptID: lease.AttemptID}
@@ -239,11 +274,19 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 			acceptance = append(acceptance, agent.DescribeGate(g))
 		}
 	}
+	for _, h := range t.Status.Hints {
+		src := "a person"
+		if h.By != "" {
+			src = h.By
+		}
+		fb = append(fb, api.Feedback{Source: "hint from " + src, Hint: h.Text})
+	}
 	attempt := t.Status.Attempt
 	if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
 		s.Phase, s.Reason, s.Message = api.PhaseWorking, "AgentRunning", ""
 		s.PatchRound = round
 		s.NextFeedback = nil
+		s.Hints = nil
 		s.Op = &api.Op{Kind: "agent", Attempt: attempt, Round: round, StartedAt: time.Now().UTC()}
 		return nil
 	}); err != nil {
@@ -258,13 +301,23 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 	}
 	prompt := agent.Prompt{Task: t.ID, Attempt: attempt, Round: round, Intent: t.Spec.Intent, Scope: t.Spec.Scope,
 		Acceptance: acceptance, Feedback: fb}
+	if t.Spec.Kind == api.KindPlan {
+		prompt.Plan, prompt.Scope, prompt.Agents, prompt.Gates = true, nil, c.Config.AdapterNames(), acceptance
+		prompt.Acceptance = nil
+	}
 	c.event(t.ID, "agent_start", map[string]any{"attempt": attempt, "round": round, "adapter": a.Name, "feedback": fb})
 	id := t.ID
 	c.start(id, "agent", func(opCtx context.Context) {
 		lastEvent := time.Time{}
+		msgs := &messageBuffer{flush: func(text string) { c.event(id, "agent", agent.Event{Kind: "message", Detail: text}) }}
 		out, err := c.Runner.Run(opCtx, agent.RunRequest{
 			Lease: &lease, Adapter: a, Prompt: prompt, Timeout: b.PerRunTimeout, MaxTokens: maxTokens,
 			Events: func(ev agent.Event) {
+				if ev.Kind == "message" {
+					msgs.add(ev.Detail)
+					return
+				}
+				msgs.drain()
 				if ev.Kind == "usage" && time.Since(lastEvent) < 5*time.Second {
 					return
 				}
@@ -272,6 +325,7 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 				c.event(id, "agent", ev)
 			},
 		})
+		msgs.drain()
 		if err != nil {
 			out = api.Outcome{Attempt: attempt, Round: round, Reason: api.OutcomeCrashed, Message: err.Error()}
 		}

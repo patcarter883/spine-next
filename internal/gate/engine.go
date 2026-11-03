@@ -153,7 +153,7 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 			return Verdict{}, fmt.Errorf("gate %s: %w", name, err)
 		}
 		gv := api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, ToolExitCode: cur.ExitCode,
-			Metrics: cur.Metrics, Cached: cur.Cached, Duration: cur.Duration}
+			Metrics: cur.Metrics, Cached: cur.Cached, Duration: cur.Duration, Artifacts: cur.Artifacts}
 		if g.Policy == api.BaselineRelative {
 			var base *tools.Result
 			if cur.ExitCode != 0 || hasErrors(cur.Diagnostics) || e.AlwaysBaseline {
@@ -165,6 +165,10 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 					return Verdict{}, fmt.Errorf("gate %s (baseline): %w", name, err)
 				}
 				base = &b
+				for _, a := range b.Artifacts {
+					a.Name = "base-" + a.Name
+					gv.Artifacts = append(gv.Artifacts, a)
+				}
 				code := b.ExitCode
 				gv.BaseExitCode = &code
 				gv.Cached = gv.Cached && b.Cached

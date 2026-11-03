@@ -106,11 +106,7 @@ const (
 )
 
 // ArtifactRef points at a full log or payload in the artifact store.
-type ArtifactRef struct {
-	Name   string `json:"name"`
-	Digest string `json:"digest"` // "sha256:<hex>"
-	Size   int64  `json:"size"`
-}
+type ArtifactRef = api.ArtifactRef
 
 // Result is the only thing a tool returns. There is no free-form chat.
 type Result struct {

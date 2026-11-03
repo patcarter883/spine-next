@@ -28,6 +28,19 @@ const (
 	Approve Kind = "approve"
 	Retry   Kind = "retry"
 	Cancel  Kind = "cancel"
+	// Hint adds a person's note to the next repair round; on an escalated
+	// task it also resumes work (another round, or a fresh attempt).
+	Hint Kind = "hint"
+	// Edit replaces a Pending task's spec (a new generation), or edits an
+	// escalated/failed/cancelled task and retries it.
+	Edit Kind = "edit"
+	// Rollback continues a stopped task from one of its snapshots.
+	Rollback Kind = "rollback"
+	// PlanAccept closes a planner task once its tasks were submitted.
+	PlanAccept Kind = "plan_accept"
+	// GC removes old snapshot refs, stray worktrees and old tool-cache
+	// entries (repository-wide; Task is empty).
+	GC Kind = "gc"
 )
 
 // Command is one request to the controller.
@@ -38,6 +51,9 @@ type Command struct {
 	Spec *api.Spec  `json:"spec,omitempty"` // Submit
 	At   time.Time  `json:"at"`
 	By   string     `json:"by,omitempty"`
+	Text string     `json:"text,omitempty"` // Hint; Retry (optional hint); PlanAccept (summary)
+	Seq  int        `json:"seq,omitempty"`  // Rollback: snapshot sequence number
+	Days int        `json:"days,omitempty"` // GC: keep anything newer than this
 }
 
 // Dir returns the inbox directory for a git common dir.

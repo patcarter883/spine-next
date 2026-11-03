@@ -67,6 +67,16 @@ type GateVerdict struct {
 	Cached       bool               `json:"cached"`
 	Duration     time.Duration      `json:"duration_ns"`
 	Reason       string             `json:"reason,omitempty"` // CamelCase machine reason
+	// Artifacts are the full tool logs in the artifact store (the run on the
+	// evaluated tree, and "base-..." for the baseline run).
+	Artifacts []ArtifactRef `json:"artifacts,omitempty"`
+}
+
+// ArtifactRef points at a full log or payload in the artifact store.
+type ArtifactRef struct {
+	Name   string `json:"name"`
+	Digest string `json:"digest"` // "sha256:<hex>"
+	Size   int64  `json:"size"`
 }
 
 // Passed reports whether the verdict lets the task proceed.

@@ -48,6 +48,7 @@ type Supervisor struct {
 	limits *Limits
 	mu     sync.Mutex
 	repos  map[string]*runner
+	ctx    context.Context
 }
 
 type runner struct {
@@ -79,6 +80,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	s.limits = NewLimits(map[string]int{"agent": s.Config.MaxAgents, "gate": s.Config.MaxGates})
 	s.mu.Lock()
 	s.repos = map[string]*runner{}
+	s.ctx = ctx
 	s.mu.Unlock()
 
 	tk := time.NewTicker(s.Config.Reload)
@@ -128,6 +130,44 @@ func (s *Supervisor) sync(ctx context.Context) {
 		r.cancel()
 		<-r.done
 	}
+}
+
+// Restart stops a repository's controller and starts it again (it rereads
+// .spine/config.yaml). Restarts done this way do not count as failures.
+func (s *Supervisor) Restart(name string) error {
+	s.mu.Lock()
+	r := s.repos[name]
+	ctx := s.ctx
+	if r != nil {
+		delete(s.repos, name)
+	}
+	s.mu.Unlock()
+	if r == nil || ctx == nil {
+		return fmt.Errorf("%w: %s", ErrUnknownRepo, name)
+	}
+	s.Logf("%s: restarting", name)
+	r.cancel()
+	<-r.done
+	s.sync(ctx)
+	return nil
+}
+
+// RepoSlots reports a running controller's slot holders.
+func (s *Supervisor) RepoSlots(name string) ([]api.TaskID, int, bool) {
+	s.mu.Lock()
+	r := s.repos[name]
+	s.mu.Unlock()
+	if r == nil {
+		return nil, 0, false
+	}
+	r.mu.Lock()
+	a := r.app
+	r.mu.Unlock()
+	if a == nil {
+		return nil, 0, false
+	}
+	held, par := a.Controller.SlotInfo()
+	return held, par, true
 }
 
 func (s *Supervisor) stopAll() {

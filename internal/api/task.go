@@ -22,7 +22,19 @@ type Spec struct {
 	Budget     Budget           `json:"budget"`
 	Escalation EscalationPolicy `json:"escalation"`
 	Adapter    string           `json:"adapter,omitempty"` // agent adapter name; empty = config default
+	// Kind is "" for a change task, or KindPlan for a planner task: its
+	// agent proposes a task breakdown for Intent (the goal) instead of
+	// changing code, and the plan is reviewed by a person before any task
+	// in it is submitted.
+	Kind string `json:"kind,omitempty"`
+	// CreatedBy is who submitted the task (CLI user, dashboard user).
+	CreatedBy string `json:"created_by,omitempty"`
+	// Template names the preset the task was created from, if any.
+	Template string `json:"template,omitempty"`
 }
+
+// KindPlan marks a planner task.
+const KindPlan = "plan"
 
 // Budget bounds a task (RFC §3.1). Zero fields take defaults.
 type Budget struct {
@@ -71,19 +83,23 @@ const (
 	PhaseEscalated   Phase = "Escalated"
 	PhaseFailed      Phase = "Failed"
 	PhaseCancelled   Phase = "Cancelled"
+	// PhasePlanned ends a planner task whose plan a person accepted.
+	PhasePlanned Phase = "Planned"
 )
 
 // Terminal phases are not reconciled. Escalated waits for a human.
 func (p Phase) Terminal() bool {
 	switch p {
-	case PhaseIntegrated, PhaseFailed, PhaseCancelled, PhaseEscalated:
+	case PhaseIntegrated, PhaseFailed, PhaseCancelled, PhaseEscalated, PhasePlanned:
 		return true
 	}
 	return false
 }
 
 // Done phases never change again without a new generation.
-func (p Phase) Done() bool { return p == PhaseIntegrated || p == PhaseFailed || p == PhaseCancelled }
+func (p Phase) Done() bool {
+	return p == PhaseIntegrated || p == PhaseFailed || p == PhaseCancelled || p == PhasePlanned
+}
 
 // Condition types and their sole writers (RFC §4.3).
 const (
@@ -232,6 +248,42 @@ type Status struct {
 	TokensUsed         int64         `json:"tokens_used"`
 	StartedAt          time.Time     `json:"started_at,omitempty"`
 	IntegratedCommit   string        `json:"integrated_commit,omitempty"`
+	// Hints are typed notes from a person, given to the next agent round.
+	Hints []Hint `json:"hints,omitempty"`
+	// ResumeFrom, when set on a Pending task, is a snapshot the next attempt
+	// starts from instead of a clean base (an operator rollback).
+	ResumeFrom *SnapshotRef `json:"resume_from,omitempty"`
+	// Plan is a planner task's proposed breakdown.
+	Plan *Plan `json:"plan,omitempty"`
+}
+
+// Hint is a person's note for the next repair round.
+type Hint struct {
+	Text string    `json:"text"`
+	By   string    `json:"by,omitempty"`
+	At   time.Time `json:"at"`
+}
+
+// Plan is a proposed set of tasks for a goal.
+type Plan struct {
+	Notes string     `json:"notes,omitempty"`
+	Tasks []PlanTask `json:"tasks"`
+}
+
+// PlanTask is one proposed task. Fields mirror the new-task form.
+type PlanTask struct {
+	ID              string   `json:"id"`
+	Title           string   `json:"title,omitempty"`
+	Intent          string   `json:"intent"`
+	Scope           []string `json:"scope,omitempty"`
+	After           []string `json:"after,omitempty"`
+	Agent           string   `json:"agent,omitempty"`
+	Gates           []string `json:"gates,omitempty"`
+	Template        string   `json:"template,omitempty"`
+	RequireApproval bool     `json:"require_approval,omitempty"`
+	MaxAttempts     int      `json:"max_attempts,omitempty"`
+	MaxRounds       int      `json:"max_rounds,omitempty"`
+	MaxTokens       int64    `json:"max_tokens,omitempty"`
 }
 
 // Cond returns the condition of the given type.

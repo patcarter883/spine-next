@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/patcarter883/spine-next/internal/app"
+	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/doctor"
 	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
@@ -60,6 +61,18 @@ func main() {
 		err = runCommand(ctx, inbox.Retry, args)
 	case "cancel":
 		err = runCommand(ctx, inbox.Cancel, args)
+	case "hint":
+		err = runCommand(ctx, inbox.Hint, args)
+	case "rollback":
+		err = runCommand(ctx, inbox.Rollback, args)
+	case "pause":
+		err = runPause(ctx, true, args)
+	case "resume":
+		err = runPause(ctx, false, args)
+	case "plan":
+		err = runPlan(ctx, args)
+	case "users":
+		err = runUsers(ctx, args)
 	case "doctor":
 		err = runDoctor(ctx, args)
 	case "recover":
@@ -88,7 +101,9 @@ commands:
   init        scaffold .spine/config.yaml and .spine/gates.yaml for this repository
   run         submit a task: spine run [--scope GLOB]... [--base BRANCH] [--require-approval] "intent"
               (runs a controller inline until the task finishes if none is running)
-  ui          web dashboard on http://127.0.0.1:8765 (read-only + approve/retry/cancel)
+  ui          web dashboard on http://127.0.0.1:8765 [--read-only] [--addr A --tls-cert C --tls-key K]
+  users       add NAME [--role viewer|operator|admin] | list | remove NAME: dashboard sign-in
+  plan        "goal": a planner agent proposes tasks to review | validate FILE | submit FILE
   repos       add [PATH] [--name N] | list | remove NAME: repositories the supervisor runs
   supervisor  run | status | install: one process for every registered repository,
               with supervisor-wide agent/gate limits and one dashboard (~/.config/spine/supervisor.yaml)
@@ -98,9 +113,13 @@ commands:
   approve ID  integrate a task held for approval
   retry ID    give an escalated or failed task another attempt
   cancel ID   stop a task and release its worktree
+  hint ID "text"       give the next repair round a hint (resumes an escalated task)
+  rollback ID SNAPSHOT continue a stopped task from one of its snapshots
+  pause [reason] | resume   stop/allow starting new tasks in this repository
   doctor    check environment, store and repository invariants
   recover   repair state after a crash
-  gc        checkpoint the SQLite WAL
+  gc        checkpoint the SQLite WAL; --days N also removes old snapshot refs,
+            stray worktrees and tool-cache entries (--dry-run lists them)
   version   print the version
 `)
 }
@@ -167,15 +186,65 @@ func runRecover(ctx context.Context, args []string) error {
 }
 
 func runGC(ctx context.Context, args []string) error {
-	repo, _, err := repoFlag("gc", args)
+	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
+	repo := fs.String("repo", ".", "repository (any checkout)")
+	days := fs.Int("days", 0, "also remove snapshot refs of tasks finished more than N days ago, stray worktrees and older tool-cache entries")
+	dry := fs.Bool("dry-run", false, "with --days: list what would be removed")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cd, err := worktree.ResolveCommonDir(*repo)
 	if err != nil {
 		return err
 	}
-	cd, err := worktree.ResolveCommonDir(repo)
-	if err != nil {
-		return err
+	db := worktree.DatabasePath(cd)
+	if *days > 0 && (*dry || storage.IsLocked(db)) {
+		if !*dry {
+			// The controller holds the locks GC needs: ask it.
+			if _, err := inbox.Write(inbox.Dir(cd), inbox.Command{Kind: inbox.GC, Days: *days, By: os.Getenv("USER")}); err != nil {
+				return err
+			}
+			fmt.Println("gc queued for the running controller")
+			return nil
+		}
+		st, err := storage.OpenReadOnly(ctx, db)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		primary, err := worktree.PrimaryOf(ctx, *repo)
+		if err != nil {
+			return err
+		}
+		root := worktree.DefaultRoot(cd)
+		if cfg, err := config.Load(primary); err == nil && cfg.WorktreeRoot != "" {
+			root = cfg.WorktreeRoot
+		}
+		rep, err := worktree.PlanGC(ctx, primary, root, st, *days)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
 	}
-	st, err := storage.Open(ctx, worktree.DatabasePath(cd), storage.Options{})
+	if *days > 0 {
+		m, st, err := openManager(ctx, *repo)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		rep, err := m.GC(ctx, *days)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("removed %d snapshot refs, %d stray worktrees, %d tool-cache entries\n", len(rep.SnapshotRefs), len(rep.StrayWorktrees), rep.OldCacheRows)
+		for _, e := range rep.Errors {
+			fmt.Println("  error:", e)
+		}
+		return nil
+	}
+	st, err := storage.Open(ctx, db, storage.Options{})
 	if err != nil {
 		return err
 	}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/patcarter883/spine-next/internal/agent"
+	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/artifacts"
 	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/gate"
@@ -31,6 +32,12 @@ type Options struct {
 	Config  *config.Config // nil = load .spine/config.yaml
 	Logf    func(string, ...any)
 	Workers int
+	// Set by the multi-repo supervisor.
+	Repo       string
+	Limits     reconciler.Limiter
+	ResolveDep func(ctx context.Context, repo string, id api.TaskID) (api.Phase, error)
+	// Supervisor overrides the configured decision supervisor (tests).
+	Supervisor reconciler.Supervisor
 }
 
 // App is an opened repository. It holds the database writer lock.
@@ -90,15 +97,16 @@ func Open(ctx context.Context, repo string, o Options) (*App, error) {
 		&build.Runner{ScratchDir: scratch, Artifacts: &artifacts.Store{Dir: filepath.Join(cd, "spine", "artifacts")}})
 	a.Gate = &gate.Engine{Reg: a.Registry, ScratchDir: scratch}
 	a.Runner = &agent.Runner{Procs: a.WT, Version: Version}
-	var sup reconciler.Supervisor
-	if a.Config.Supervisor.Type == "llm" {
+	sup := o.Supervisor
+	if sup == nil && a.Config.Supervisor.Type == "llm" {
 		// Credentials come from the environment (ANTHROPIC_API_KEY, an
 		// `ant auth login` profile, ...), resolved by the SDK.
 		sup = &reconciler.LLMSupervisor{Client: anthropic.NewClient(), Model: a.Config.Supervisor.Model,
 			Effort: a.Config.Supervisor.Effort, Timeout: a.Config.Supervisor.Timeout}
 	}
 	a.Controller = reconciler.New(reconciler.Deps{Store: st, WT: a.WT, Gate: a.Gate, Runner: a.Runner, Config: a.Config,
-		Supervisor: sup, Logf: o.Logf, Workers: o.Workers, ParseAvailable: ast.Available()})
+		Supervisor: sup, Logf: o.Logf, Workers: o.Workers, ParseAvailable: ast.Available(),
+		Limits: o.Limits, ResolveDep: o.ResolveDep, Repo: o.Repo})
 	return a, nil
 }
 

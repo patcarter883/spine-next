@@ -56,6 +56,35 @@ What the controller guarantees:
 - **Failures escalate rather than loop.** Budgets (attempts, rounds, wall clock, tokens) are enforced as a closed set of legal supervisor actions; when none is left, the task escalates to you with its worktree kept.
 - **Your checkout is never touched mid-edit.** If `main` is checked out with uncommitted changes to tracked files, integration waits instead of overwriting them.
 
+## Several repositories: `spine supervisor`
+
+One process can run Spine for every repository you register. Storage stays per repository: each keeps its own database, writer lock, inbox, worktrees and crash recovery in its own `.git`, exactly as with `spine controller`.
+
+```sh
+spine repos add ~/src/lib            # name defaults to the directory name
+spine repos add ~/src/app --name app
+spine supervisor                     # runs every registered repository; dashboard on http://127.0.0.1:8765
+spine supervisor status              # per-repository state, restarts, limits in use
+spine supervisor install             # writes a systemd user unit that starts it on login
+```
+
+What the supervisor adds over separate controllers:
+
+- **One dashboard** with a repository switcher and an "All repositories" view. Broken repositories show in a banner with their error and restart count.
+- **Supervisor-wide limits:** concurrent agent runs and gate evaluations are capped across all repositories, so 5 repos don't mean 5 × `parallel` agents. A task waiting for a slot logs "waiting for a supervisor-wide agent slot". Configure the caps in `~/.config/spine/supervisor.yaml` (`addr`, `max_agents`, default 4, `max_gates`, default 2).
+- **Cross-repository dependencies:** `spine run --after lib:bump-v2 "use lib v2"` waits until task `bump-v2` in the `lib` repository has integrated. A task waits up to 10 minutes for a dependency that hasn't been submitted yet, local or cross-repository, before escalating.
+- **Live registry:** `spine repos add` or `spine repos remove` take effect within seconds, without a restart. Removing a repository stops its controller but leaves its tasks, database and worktrees untouched.
+
+How it isolates failures:
+
+- **Panics:** every goroutine a controller starts recovers panics. A panic stops that repository's controller only. The supervisor reopens the repository from disk, which runs crash recovery like a fresh `spine controller`, and restarts it with backoff (1 s, doubling up to 5 min, reset after 5 minutes of healthy running).
+- **Broken repositories:** a repository that can't start, for example because a standalone `spine controller` already holds its lock, is marked broken and retried. The others keep running.
+- **One supervisor per user**, enforced by a lock in `~/.config/spine`.
+
+Every other command works the same under the supervisor. `spine run`, `status`, `logs`, `approve`, `retry` and `cancel` inside a registered repository talk to it through that repository's inbox and read-only database.
+
+`TestSupervisorTwoReposLimitAndCrossRepoDep` and `TestSupervisorPanicIsolationAndBrokenRepo` in `internal/e2e` cover the limits, cross-repository ordering, panic restart and broken-repository recovery.
+
 ## Status: MVP (M0–M2 complete; M3 LLM supervisor and M4 dashboard implemented, not yet validated against live models)
 
 ### M3: LLM supervisor

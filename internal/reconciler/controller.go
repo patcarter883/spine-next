@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -34,6 +35,21 @@ type Deps struct {
 	Logf       func(format string, args ...any)
 	// ParseAvailable selects the default gates (ts.parse needs CGO).
 	ParseAvailable bool
+	// Limits, when set, bounds agent and gate runs across controllers (the
+	// multi-repo supervisor shares one Limiter between all repositories).
+	Limits Limiter
+	// ResolveDep looks up a dependency written as "repo:task" (another
+	// repository under the same supervisor). nil = cross-repo dependencies
+	// are rejected. It returns storage.ErrNotFound for unknown tasks.
+	ResolveDep func(ctx context.Context, repo string, id api.TaskID) (api.Phase, error)
+	// Repo is this controller's name under a supervisor ("" standalone);
+	// "<Repo>:<task>" dependencies resolve locally.
+	Repo string
+}
+
+// Limiter bounds concurrent operations of a kind ("agent", "gate").
+type Limiter interface {
+	Acquire(ctx context.Context, kind string) (release func(), err error)
 }
 
 // Controller runs the loop.
@@ -48,8 +64,13 @@ type Controller struct {
 	// the per-key queue (a command never races a reconcile of its task).
 	staged map[api.TaskID][]inbox.Entry
 	seen   map[string]bool // staged inbox paths
-	ops    sync.WaitGroup
-	ctx    context.Context
+	// fatal receives the first panic from any of the controller's
+	// goroutines; Run then shuts the controller down and returns it, so a
+	// bug in one repository's controller cannot take down a supervisor.
+	fatal     chan error
+	fatalOnce sync.Once
+	ops       sync.WaitGroup
+	ctx       context.Context
 }
 
 type flight struct {
@@ -79,12 +100,19 @@ func New(d Deps) *Controller {
 		d.Config.Resync = 15 * time.Second
 	}
 	return &Controller{Deps: d, q: newQueue(), inflight: map[api.TaskID]*flight{}, slots: map[api.TaskID]bool{},
-		staged: map[api.TaskID][]inbox.Entry{}, seen: map[string]bool{}}
+		staged: map[api.TaskID][]inbox.Entry{}, seen: map[string]bool{}, fatal: make(chan error, 1)}
 }
 
 // Run recovers, then reconciles until ctx ends. On return every operation
 // it started has finished and every agent process group is gone.
-func (c *Controller) Run(ctx context.Context) error {
+func (c *Controller) Run(parent context.Context) (err error) {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			err = panicError(r)
+		}
+	}()
 	c.ctx = ctx
 	// 1. Crash recovery BEFORE accepting work (RFC §4.4).
 	rep, err := c.WT.Recover(ctx)
@@ -106,6 +134,7 @@ func (c *Controller) Run(ctx context.Context) error {
 	loops.Add(2)
 	go func() {
 		defer loops.Done()
+		defer c.guard()
 		tk := time.NewTicker(300 * time.Millisecond)
 		defer tk.Stop()
 		for {
@@ -121,6 +150,7 @@ func (c *Controller) Run(ctx context.Context) error {
 	}()
 	go func() {
 		defer loops.Done()
+		defer c.guard()
 		tk := time.NewTicker(c.Config.Resync)
 		defer tk.Stop()
 		for {
@@ -137,11 +167,18 @@ func (c *Controller) Run(ctx context.Context) error {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			defer c.guard()
 			for c.processNext(ctx) {
 			}
 		}()
 	}
-	<-ctx.Done()
+	var failure error
+	select {
+	case <-ctx.Done():
+	case failure = <-c.fatal:
+		c.Logf("controller stopping after a panic: %v", failure)
+		cancel()
+	}
 	c.q.ShutDown()
 	workers.Wait()
 	loops.Wait()
@@ -151,7 +188,22 @@ func (c *Controller) Run(ctx context.Context) error {
 	}
 	c.mu.Unlock()
 	c.ops.Wait()
-	return nil
+	return failure
+}
+
+// ErrPanic marks an error produced by a recovered panic.
+var ErrPanic = errors.New("controller: panic")
+
+func panicError(r any) error {
+	return fmt.Errorf("%w: %v\n%s", ErrPanic, r, debug.Stack())
+}
+
+// guard is deferred in every goroutine the controller starts.
+func (c *Controller) guard() {
+	if r := recover(); r != nil {
+		err := panicError(r)
+		c.fatalOnce.Do(func() { c.fatal <- err })
+	}
 }
 
 func (c *Controller) processNext(ctx context.Context) bool {
@@ -277,12 +329,38 @@ func (c *Controller) start(id api.TaskID, kind string, fn func(ctx context.Conte
 		defer c.ops.Done()
 		defer close(f.done)
 		defer cancel()
+		defer c.guard()
+		defer func() {
+			c.mu.Lock()
+			delete(c.inflight, id)
+			c.mu.Unlock()
+			c.q.Add(id)
+		}()
+		if c.Limits != nil {
+			release, err := c.acquireGlobal(ctx, id, kind)
+			if err != nil {
+				return // cancelled while queued; the stale Op is cleared on the next reconcile
+			}
+			defer release()
+		}
 		fn(ctx)
-		c.mu.Lock()
-		delete(c.inflight, id)
-		c.mu.Unlock()
-		c.q.Add(id)
 	}()
+}
+
+// acquireGlobal waits for a supervisor-wide slot, noting the wait in the
+// task's log when it is not immediate.
+func (c *Controller) acquireGlobal(ctx context.Context, id api.TaskID, kind string) (func(), error) {
+	quick, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	release, err := c.Limits.Acquire(quick, kind)
+	cancel()
+	if err == nil {
+		return release, nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	c.event(id, "queued", map[string]any{"kind": kind, "reason": "waiting for a supervisor-wide " + kind + " slot"})
+	return c.Limits.Acquire(ctx, kind)
 }
 
 // stop cancels the task's in-flight operation and waits for it.

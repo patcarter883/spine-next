@@ -42,6 +42,10 @@ func main() {
 		err = runRun(ctx, args)
 	case "ui":
 		err = runUI(ctx, args)
+	case "repos":
+		err = runRepos(ctx, args)
+	case "supervisor":
+		err = runSupervisor(ctx, args)
 	case "controller":
 		err = runController(ctx, args)
 	case "status":
@@ -85,6 +89,9 @@ commands:
   run         submit a task: spine run [--scope GLOB]... [--base BRANCH] [--require-approval] "intent"
               (runs a controller inline until the task finishes if none is running)
   ui          web dashboard on http://127.0.0.1:8765 (read-only + approve/retry/cancel)
+  repos       add [PATH] [--name N] | list | remove NAME: repositories the supervisor runs
+  supervisor  run | status | install: one process for every registered repository,
+              with supervisor-wide agent/gate limits and one dashboard (~/.config/spine/supervisor.yaml)
   controller  run the controller for this repository until interrupted
   status ID   show a task            list [--all]   list tasks
   logs ID     show a task's events (-f to follow)

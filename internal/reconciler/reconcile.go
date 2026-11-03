@@ -120,14 +120,19 @@ func (c *Controller) clearOp(ctx context.Context, t *api.Task) (Result, error) {
 
 func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (Result, error) {
 	for _, dep := range t.Spec.DependsOn {
-		d, err := c.Store.GetTask(ctx, dep)
-		if errors.Is(err, storage.ErrNotFound) {
-			return c.escalate(ctx, t, "UnknownDependency", string(dep))
+		phase, err := c.depPhase(ctx, dep)
+		if errors.Is(err, storage.ErrNotFound) && time.Since(t.CreatedAt) < UnknownDependencyGrace {
+			// Tasks may be submitted in any order (and across repositories):
+			// wait a while for the dependency to appear before escalating.
+			return Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, errNoCrossRepo) {
+			return c.escalate(ctx, t, "UnknownDependency", string(dep)+": "+err.Error())
 		}
 		if err != nil {
 			return Result{}, err
 		}
-		switch d.Status.Phase {
+		switch phase {
 		case api.PhaseIntegrated:
 		case api.PhaseFailed, api.PhaseCancelled:
 			return c.escalate(ctx, t, "DependencyFailed", string(dep))
@@ -167,6 +172,29 @@ func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (
 		return nil
 	})
 	return Result{Requeue: true}, err
+}
+
+// UnknownDependencyGrace is how long a task waits for a dependency that
+// does not exist yet before escalating.
+var UnknownDependencyGrace = 10 * time.Minute
+
+var errNoCrossRepo = errors.New("cross-repository dependencies need `spine supervisor`")
+
+// depPhase resolves a dependency: a local task id, or "repo:task" for a
+// task in another repository under the same supervisor.
+func (c *Controller) depPhase(ctx context.Context, dep api.TaskID) (api.Phase, error) {
+	repo, id, cross := strings.Cut(string(dep), ":")
+	if !cross || repo == c.Repo {
+		if cross {
+			dep = api.TaskID(id)
+		}
+		d, err := c.Store.GetTask(ctx, dep)
+		return d.Status.Phase, err
+	}
+	if c.ResolveDep == nil {
+		return "", errNoCrossRepo
+	}
+	return c.ResolveDep(ctx, repo, api.TaskID(id))
 }
 
 // - Agent -

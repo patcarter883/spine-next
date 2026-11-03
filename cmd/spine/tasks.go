@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -502,7 +503,16 @@ func runUI(ctx context.Context, args []string) error {
 	}
 	defer st.Close()
 	db, cd, _ := app.DBPath(*repo)
-	srv := &http.Server{Addr: *addr, Handler: (&ui.Server{Store: st, InboxDir: inbox.Dir(cd), Running: func() bool { return storage.IsLocked(db) }}).Handler()}
+	primary, _ := worktree.PrimaryOf(ctx, *repo)
+	name := filepath.Base(primary)
+	src := ui.SourceFunc(func(context.Context) []ui.Repo {
+		state := "stopped"
+		if storage.IsLocked(db) {
+			state = "running"
+		}
+		return []ui.Repo{{Name: name, Path: primary, State: state, Store: st, InboxDir: inbox.Dir(cd)}}
+	})
+	srv := &http.Server{Addr: *addr, Handler: (&ui.Server{Source: src}).Handler()}
 	go func() { <-ctx.Done(); srv.Close() }()
 	fmt.Printf("spine ui on http://%s\n", *addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

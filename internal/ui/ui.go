@@ -1,7 +1,9 @@
-// Package ui serves `spine ui`: a small embedded dashboard (RFC §10, M4).
-// It reads the database read-only (it never takes the writer lock) and
-// sends approve/retry/cancel through the same inbox as the CLI, so the
-// controller remains the only writer. Updates are pushed with SSE.
+// Package ui serves the Spine dashboard: `spine ui` for one repository and
+// `spine supervisor` for every registered repository. It reads each
+// repository's database read-only (it never takes a writer lock) and sends
+// approve/retry/cancel through that repository's inbox, the same path as the
+// CLI, so each repository's controller stays its database's only writer.
+// Updates are pushed with SSE.
 package ui
 
 import (
@@ -10,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -21,12 +24,32 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
-// Server serves the dashboard for one repository.
+// Repo is one repository the dashboard shows.
+type Repo struct {
+	Name     string         `json:"name"`
+	Path     string         `json:"path"`
+	State    string         `json:"state"` // running, stopped, broken, starting
+	Error    string         `json:"error,omitempty"`
+	Restarts int            `json:"restarts,omitempty"`
+	Store    *storage.Store `json:"-"` // read-only; nil if the database cannot be opened
+	InboxDir string         `json:"-"`
+}
+
+// Source lists the repositories to show.
+type Source interface {
+	Repos(ctx context.Context) []Repo
+}
+
+// SourceFunc adapts a function.
+type SourceFunc func(ctx context.Context) []Repo
+
+func (f SourceFunc) Repos(ctx context.Context) []Repo { return f(ctx) }
+
+// Server serves the dashboard.
 type Server struct {
-	Store    *storage.Store // read-only
-	InboxDir string
-	// Running reports whether a controller holds the store.
-	Running func() bool
+	Source Source
+	// Multi is true under the supervisor (shows the repository switcher).
+	Multi bool
 }
 
 // Handler returns the HTTP routes.
@@ -37,15 +60,16 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
 		w.Write(indexHTML)
 	})
-	mux.HandleFunc("GET /api/tasks", s.tasks)
-	mux.HandleFunc("GET /api/tasks/{id}", s.task)
-	mux.HandleFunc("GET /api/tasks/{id}/events", s.events)
+	mux.HandleFunc("GET /api/overview", s.overviewHandler)
+	mux.HandleFunc("GET /api/repos/{repo}/tasks/{id}", s.task)
+	mux.HandleFunc("GET /api/repos/{repo}/tasks/{id}/events", s.events)
 	mux.HandleFunc("GET /api/stream", s.stream)
-	mux.HandleFunc("POST /api/tasks/{id}/{action}", s.command)
+	mux.HandleFunc("POST /api/repos/{repo}/tasks/{id}/{action}", s.command)
 	return mux
 }
 
 type taskRow struct {
+	Repo       string     `json:"repo"`
 	ID         api.TaskID `json:"id"`
 	Title      string     `json:"title"`
 	Phase      api.Phase  `json:"phase"`
@@ -61,7 +85,7 @@ type taskRow struct {
 	FailedGate string     `json:"failed_gate,omitempty"`
 }
 
-func row(t api.Task) taskRow {
+func row(repo string, t api.Task) taskRow {
 	title := t.Spec.Title
 	if title == "" {
 		title = t.Spec.Intent
@@ -69,7 +93,7 @@ func row(t api.Task) taskRow {
 			title = title[:100] + "…"
 		}
 	}
-	r := taskRow{ID: t.ID, Title: title, Phase: t.Status.Phase, Reason: t.Status.Reason, Message: t.Status.Message,
+	r := taskRow{Repo: repo, ID: t.ID, Title: title, Phase: t.Status.Phase, Reason: t.Status.Reason, Message: t.Status.Message,
 		Attempt: t.Status.Attempt, Round: t.Status.PatchRound, Tokens: t.Status.TokensUsed, Created: t.CreatedAt,
 		Updated: t.UpdatedAt, Commit: t.Status.IntegratedCommit, NeedsYou: t.Status.Phase == api.PhaseEscalated}
 	if g := t.Status.LastGate; g != nil && !g.Passed {
@@ -83,29 +107,56 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func (s *Server) list(ctx context.Context) ([]taskRow, error) {
-	ts, err := s.Store.ListTasks(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]taskRow, 0, len(ts))
-	for _, t := range ts {
-		out = append(out, row(t))
-	}
-	return out, nil
+type overview struct {
+	Multi bool      `json:"multi"`
+	Repos []Repo    `json:"repos"`
+	Tasks []taskRow `json:"tasks"`
 }
 
-func (s *Server) tasks(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.list(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+// overview lists every repository and all their tasks, newest first.
+func (s *Server) overview(ctx context.Context) overview {
+	repos := s.Source.Repos(ctx)
+	o := overview{Multi: s.Multi, Repos: repos, Tasks: []taskRow{}}
+	for i, r := range repos {
+		if r.Store == nil {
+			continue
+		}
+		ts, err := r.Store.ListTasks(ctx)
+		if err != nil {
+			if o.Repos[i].Error == "" {
+				o.Repos[i].Error = "reading tasks: " + err.Error()
+			}
+			continue
+		}
+		for _, t := range ts {
+			o.Tasks = append(o.Tasks, row(r.Name, t))
+		}
 	}
-	writeJSON(w, map[string]any{"tasks": rows, "controller": s.Running != nil && s.Running()})
+	sort.SliceStable(o.Tasks, func(i, j int) bool { return o.Tasks[i].Created.After(o.Tasks[j].Created) })
+	return o
+}
+
+func (s *Server) overviewHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.overview(r.Context()))
+}
+
+func (s *Server) repo(r *http.Request) (Repo, bool) {
+	name := r.PathValue("repo")
+	for _, x := range s.Source.Repos(r.Context()) {
+		if x.Name == name && x.Store != nil {
+			return x, true
+		}
+	}
+	return Repo{}, false
 }
 
 func (s *Server) task(w http.ResponseWriter, r *http.Request) {
-	t, err := s.Store.GetTask(r.Context(), api.TaskID(r.PathValue("id")))
+	repo, ok := s.repo(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	t, err := repo.Store.GetTask(r.Context(), api.TaskID(r.PathValue("id")))
 	if err == storage.ErrNotFound {
 		http.NotFound(w, r)
 		return
@@ -118,8 +169,13 @@ func (s *Server) task(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	evs, err := s.Store.ListEvents(r.Context(), api.TaskID(r.PathValue("id")), after, 1000)
+	evs, err := repo.Store.ListEvents(r.Context(), api.TaskID(r.PathValue("id")), after, 1000)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -130,8 +186,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, evs)
 }
 
-// stream pushes the task list whenever it changes (polled every second
-// server-side; the store has no change feed across processes).
+// stream pushes the overview whenever it changes (polled every second
+// server-side; databases have no change feed across processes).
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
@@ -144,14 +200,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	tk := time.NewTicker(time.Second)
 	defer tk.Stop()
 	for {
-		rows, err := s.list(r.Context())
-		if err == nil {
-			b, _ := json.Marshal(map[string]any{"tasks": rows, "controller": s.Running != nil && s.Running()})
-			if string(b) != last {
-				last = string(b)
-				fmt.Fprintf(w, "event: tasks\ndata: %s\n\n", b)
-				fl.Flush()
-			}
+		b, _ := json.Marshal(s.overview(r.Context()))
+		if string(b) != last {
+			last = string(b)
+			fmt.Fprintf(w, "event: overview\ndata: %s\n\n", b)
+			fl.Flush()
 		}
 		select {
 		case <-r.Context().Done():
@@ -173,15 +226,20 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	repo, ok := s.repo(r)
+	if !ok {
+		http.Error(w, "unknown repository", http.StatusNotFound)
+		return
+	}
 	id := api.TaskID(r.PathValue("id"))
-	if _, err := s.Store.GetTask(r.Context(), id); err != nil {
+	if _, err := repo.Store.GetTask(r.Context(), id); err != nil {
 		http.Error(w, "unknown task", http.StatusNotFound)
 		return
 	}
-	cid, err := inbox.Write(s.InboxDir, inbox.Command{Kind: k, Task: id, By: "ui"})
+	cid, err := inbox.Write(repo.InboxDir, inbox.Command{Kind: k, Task: id, By: "ui"})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	writeJSON(w, map[string]any{"queued": cid, "controller": s.Running != nil && s.Running()})
+	writeJSON(w, map[string]any{"queued": cid, "controller": repo.State == "running"})
 }

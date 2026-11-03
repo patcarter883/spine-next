@@ -61,7 +61,7 @@ func TestValidate(t *testing.T) {
 		{Error, "dependency cycle"}, {Error, "duplicate id"}, {Error, "missing intent"}, {Error, "unknown agent"},
 		{Error, "unknown gate"}, {Error, "must match"}, {Error, "relative path"}, {Error, "neither in this plan"},
 		{Error, "unknown repository"}, {Warning, "is Failed"}, {Error, "already exists"}, {Warning, "may run beside"},
-		{Warning, "matches no file"}, {Warning, "very short"},
+		{Warning, "does not exist at the base"}, {Warning, "very short"},
 	} {
 		if !has(is, c.l, c.sub) {
 			t.Errorf("missing %s %q in:\n%v", c.l, c.sub, is)

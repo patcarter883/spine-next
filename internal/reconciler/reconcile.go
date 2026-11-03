@@ -521,9 +521,6 @@ func commitMessage(t *api.Task) string {
 }
 
 func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, snap *api.SnapshotRef) (Result, error) {
-	if t.Spec.Escalation.RequireApprovalBeforeMerge && !t.Status.IsTrue(api.CondApproved) {
-		return c.escalate(ctx, t, "AwaitingApproval", "verified; run `spine approve "+string(t.ID)+"` to integrate")
-	}
 	tip, err := c.WT.ResolveCommit(ctx, t.Spec.BaseRef)
 	if err != nil {
 		return Result{}, err
@@ -551,6 +548,26 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 		}); err != nil {
 			return Result{}, err
 		}
+	}
+	// Approval comes after the merge result passed its gates, so a person
+	// reviews exactly the tree that would land (the dashboard shows its
+	// diff). Approval covers the reviewed change (its snapshot tree): if
+	// only the base moves, the result is re-gated and approval holds; a new
+	// round or attempt changes the snapshot and asks again. Approval is
+	// additive: it never excuses a gate.
+	approved := t.Status.IsTrue(api.CondApproved) && (t.Status.ApprovedTree == "" || t.Status.ApprovedTree == snap.Tree)
+	if t.Spec.Escalation.RequireApprovalBeforeMerge && !approved {
+		msg := "verified on the merge result; review the diff and run `spine approve " + string(t.ID) + "` to integrate"
+		if t.Status.IsTrue(api.CondApproved) {
+			msg = "the change differs from the one you approved (a later round or attempt); review it again"
+		}
+		if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
+			s.ProposedCommit = proposed
+			return nil
+		}); err != nil {
+			return Result{}, err
+		}
+		return c.escalate(ctx, t, "AwaitingApproval", msg)
 	}
 	res, err := c.WT.MergeAt(ctx, ws, t.Spec.BaseRef, tip, msg)
 	switch {

@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,11 +80,25 @@ func TestApprovalMergeGateOnMovedBase(t *testing.T) {
 	inbox.Write(inbox.Dir(a.CommonDir), inbox.Command{Kind: inbox.Submit, Task: "a", Spec: &sa})
 	waitPhase(t, a, "a", api.PhaseIntegrated, "")
 
+	if tb.Status.ProposedCommit == "" {
+		t.Fatal("held task should record the merge commit that would land")
+	}
+	command(t, a, inbox.Approve, "b")
+	// The approved change fails on the moved base; the fresh attempt is a
+	// different change, so it waits for approval again.
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		tb, _ = a.Store.GetTask(context.Background(), "b")
+		if tb.Status.Attempt == 2 && tb.Status.Reason == "AwaitingApproval" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if tb.Status.Attempt != 2 || tb.Status.Phase != api.PhaseEscalated || !strings.Contains(tb.Status.Message, "differs from the one you approved") {
+		t.Fatalf("b: want attempt 2 held for a new approval: a%d %q", tb.Status.Attempt, tb.Status.Message)
+	}
 	command(t, a, inbox.Approve, "b")
 	tb = waitPhase(t, a, "b", api.PhaseIntegrated, "")
-	if tb.Status.Attempt != 2 {
-		t.Fatalf("b: want a fresh attempt after failing on the new base, attempt=%d", tb.Status.Attempt)
-	}
 	sawMergeFail := false
 	evs, _ := a.Store.ListEvents(context.Background(), "b", 0, 0)
 	for _, e := range evs {

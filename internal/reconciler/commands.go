@@ -182,4 +182,3 @@ func (c *Controller) applyRepoCommand(ctx context.Context, e inbox.Entry) {
 		inbox.Reject(e.Path, fmt.Errorf("unknown repository command %q", e.Kind))
 	}
 }
-

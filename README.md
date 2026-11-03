@@ -43,16 +43,21 @@ Other commands:
 | `spine approve ID` | Integrate a task submitted with `--require-approval`. |
 | `spine retry ID` | Give an escalated or failed task one more fresh attempt. |
 | `spine cancel ID` | Stop the agent and release the worktree. |
-| `spine ui` | A web dashboard on `http://127.0.0.1:8765`, loopback only because it has no auth. It shows tasks, gate results and timelines; it can create tasks (**+ New task**, with the same options and repository defaults as `spine run`) and approve, retry or cancel them. Pages update live over SSE. It reads the database read-only; commands go through the same inbox as the CLI. |
+| `spine ui` | The web dashboard on `http://127.0.0.1:8765` (see [Dashboard](#dashboard)). |
+| `spine hint ID "text"` | Give the next repair round a hint. An escalated task resumes in its kept worktree. |
+| `spine rollback ID SNAPSHOT` | Continue a stopped task from one of its snapshots. |
+| `spine plan "goal"` | A planner agent proposes a task breakdown for review; `plan validate FILE` and `plan submit FILE` check and submit a plan. |
+| `spine pause [reason]` / `spine resume` | Stop or allow starting new tasks in this repository; running tasks finish. |
+| `spine users add NAME --role R` | Add a dashboard user (viewer, operator or admin); prints a token once. Also `users list` and `users remove`. |
 | `spine controller` | Run the controller in the foreground. It reconciles every task and resumes after a crash or `kill -9`. |
 | `spine recover` | Repair state after a crash. |
-| `spine gc` | Checkpoint the SQLite WAL. |
+| `spine gc [--days N] [--dry-run]` | Checkpoint the SQLite WAL; with `--days`, also remove snapshot refs of tasks finished more than N days ago, stray worktrees and old tool-cache entries. |
 
 What the controller guarantees:
 
 - **Only gates can mark work done.** Gates come from the base branch, so an agent can't weaken them. Storage rejects any `GatePassed`, `Verified` or `Integrated` write from a component that doesn't own that condition.
 - **The tree that lands is the tree that passed.** Integration is a compare-and-swap against the exact base tip the verdict was computed on.
-- **Approval only holds work back.** It can delay a verified task, never pass a failing one.
+- **Approval only holds work back.** It can delay a verified task, never pass a failing one. You approve after the merge result passed its gates, and approval covers the change you reviewed: a later round or attempt asks again.
 - **Failures escalate rather than loop.** Budgets (attempts, rounds, wall clock, tokens) are enforced as a closed set of legal supervisor actions; when none is left, the task escalates to you with its worktree kept.
 - **Your checkout is never touched mid-edit.** If `main` is checked out with uncommitted changes to tracked files, integration waits instead of overwriting them.
 
@@ -136,6 +141,45 @@ How it isolates failures:
 Every other command works the same under the supervisor. `spine run`, `status`, `logs`, `approve`, `retry` and `cancel` inside a registered repository talk to it through that repository's inbox and read-only database.
 
 `TestSupervisorTwoReposLimitAndCrossRepoDep` and `TestSupervisorPanicIsolationAndBrokenRepo` in `internal/e2e` cover the limits, cross-repository ordering, panic restart and broken-repository recovery.
+
+## Dashboard
+
+`spine ui` (one repository) and `spine supervisor` (all of them) serve the same dashboard. It reads each database read-only and sends every change through the repository's inbox, like the CLI.
+
+**Reviewing and steering a task**
+- **Changes:** the diff of each snapshot against its base, of one round against another, and of the merge result. A task held for approval opens on exactly what would land, with **Approve and integrate** above it.
+- **Rounds:** per repair round, the feedback the agent received, how its run ended (tokens, cost, turns, tool calls, final message), each gate's result, the failures it fixed, introduced or left, and the supervisor's decision.
+- **Logs:** full gate output (`go test`, `tsc`, …) from the artifact store, and the agent's final messages.
+- **Live:** tool calls and agent messages as they are written.
+- **Hints, edits and rollbacks:** a hint goes to the next round, and resumes an escalated task in its kept worktree. A pending task can be edited; a stopped one edited and retried, as a new spec generation. **Continue from #N** restarts from any snapshot: in place, or as a fresh attempt that replays that snapshot's diff onto the current base.
+
+**Planning**
+- **Plan:** enter a goal and a planner agent (a task of kind `plan`) writes a breakdown. `spec.validate` sends a broken plan back to it. You then edit tasks, scopes and dependencies, see validation as you type, and submit. Validation checks ids, intents, scope globs, agents, gates, dependencies (including `repo:task`), cycles, and parallel tasks claiming the same paths.
+- **Graph:** tasks and `after` links across repositories, with each task's state (running, ready, blocked, needs you, failed, done) and the critical path.
+- **Templates:** saved task shapes, from `.spine/templates.yaml` (shared through git) or saved from the form.
+- **Gates:** the new-task form shows the base's `.spine/gates.yaml`, and you can pin a subset for one task.
+- **Agent picker:** lists every adapter, including the built-in **Pi** (`pi-rpc`, version-pinned) with its model and container, and a warning when it would run without one.
+
+**Monitoring**
+- **Dashboard:** in flight, waiting on you, merged and failed today, throughput per day, and wait times.
+- **Costs:** tokens and cost per day, repository and task, against budgets.
+- **Quality:** first-round pass rate, rounds and attempts per task, escalation and failure reasons, top failing gates, and rules vs LLM supervisor decisions (how often the next round improved).
+- **Supervisor:** global agent and gate slots with holders and the queue (limits can be changed live), and per-repository worktree slots, ready tasks, health and restarts.
+- **Health:** `spine doctor` (optionally with the agent handshake), disk, database and WAL size, stuck leases and stray worktrees, and garbage collection.
+- **History:** search by text, phase, author and date; commit links when the remote is GitHub, GitLab, Bitbucket or Codeberg.
+- **Notifications:** approvals, escalations, failures, broken repositories, ready plans and budget thresholds, delivered to webhooks (Slack-compatible or JSON), email (SMTP), the desktop, and the browser. Configure them under **Settings** (`~/.config/spine/notify.yaml`).
+
+**Operations**
+- **Settings:** add and remove repositories; edit `.spine/config.yaml` through a form or as YAML (validated, comments kept; the controller restarts under the supervisor); change supervisor limits.
+- **Bulk actions:** approve, retry, cancel or hint many tasks at once.
+- **Pause and resume:** pause or resume a repository.
+
+**Access**
+- **Users:** without users, the dashboard serves loopback only and records changes as `<you> (local)`. With users (`spine users add NAME --role viewer|operator|admin`), every request needs a token, either as `Authorization: Bearer` or through the sign-in page. Viewers read, operators act on tasks, and admins manage repositories and settings. Commands carry the user's name.
+- **Audit:** every change is appended to `~/.config/spine/audit.log` (shown under **Audit**).
+- **Remote and read-only:** a non-loopback `--addr` is refused unless users exist. `--tls-cert/--tls-key` serve HTTPS, and `--read-only` rejects every change whoever asks. `spine supervisor status` reads `SPINE_TOKEN`.
+
+`internal/e2e/ui_test.go` drives these features through a real controller and a scripted agent. It covers diffs, rounds, logs, hints, rollback, the live stream, pausing, editing, bulk actions, GC and a planner run. `internal/ui/auth_test.go` covers roles, sessions, read-only mode and the audit log.
 
 ## Status: MVP (M0–M2 complete; M3 LLM supervisor and M4 dashboard implemented, not yet validated against live models)
 

@@ -546,6 +546,9 @@ func (c *Controller) apply(ctx context.Context, cmd inbox.Command) error {
 	case inbox.Approve:
 		_, err = c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceHuman, func(s *api.Status) error {
 			s.SetCondition(api.CondApproved, true, "Approved", cmd.By, api.SourceHuman)
+			if n := len(s.Snapshots); n > 0 && s.Phase == api.PhaseEscalated && s.Reason == "AwaitingApproval" {
+				s.ApprovedTree = s.Snapshots[n-1].Tree // the change that was reviewed
+			}
 			if s.Phase == api.PhaseEscalated && s.Reason == "AwaitingApproval" {
 				if s.IsTrue(api.CondVerified) {
 					s.Phase = api.PhaseVerified

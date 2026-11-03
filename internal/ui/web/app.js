@@ -8,7 +8,7 @@ const enc = encodeURIComponent;
 const fmtN = n => (n ?? 0).toLocaleString();
 const fmtUSD = n => "$" + (n ?? 0).toFixed(2);
 const fmtMin = m => !m ? "—" : m < 1 ? Math.round(m * 60) + "s" : m < 90 ? Math.round(m) + "m" : m < 2880 ? (m / 60).toFixed(1) + "h" : (m / 1440).toFixed(1) + "d";
-const fmtBytes = b => !b ? "0" : b < 1024 ? b + " B" : b < 1 << 20 ? (b / 1024).toFixed(1) + " KiB" : b < 1 << 30 ? (b / (1 << 20)).toFixed(1) + " MiB" : (b / (1 << 30)).toFixed(1) + " GiB";
+const fmtBytes = b => !b ? "empty" : b < 1024 ? b + " B" : b < 1 << 20 ? (b / 1024).toFixed(1) + " KiB" : b < 1 << 30 ? (b / (1 << 20)).toFixed(1) + " MiB" : (b / (1 << 30)).toFixed(1) + " GiB";
 const lines = v => String(v || "").split(/[\n,]/).map(x => x.trim()).filter(Boolean);
 function ago(d) { if (!d || d.startsWith("0001")) return "—"; const s = (Date.now() - new Date(d)) / 1000; if (s < 60) return Math.round(s) + "s"; if (s < 3600) return Math.round(s / 60) + "m"; if (s < 86400) return Math.round(s / 3600) + "h"; return Math.round(s / 86400) + "d" }
 const tm = d => new Date(d).toLocaleTimeString([], { hour12: false });
@@ -25,7 +25,7 @@ async function send(method, url, body) {
   const opt = { method, headers: { "X-Spine": "1" } };
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body) }
   const r = await fetch(url, opt);
-  if (r.status === 401) { showLogin(); throw new Error("sign in required") }
+  if (r.status === 401 && url !== "/api/login") { showLogin(); throw new Error("sign in required") }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(j.error || ("HTTP " + r.status)); e.body = j; throw e }
   return j;
@@ -360,12 +360,13 @@ async function tabChanges(r, t) {
   const s = t.status, snaps = s.snapshots || [];
   const merges = [];
   for (const g of [...(s.gate_history || [])]) if (g.on_merge && g.commit && !merges.includes(g.commit)) merges.push(g.commit);
+  if (s.proposed_commit && !merges.includes(s.proposed_commit) && s.phase === "Escalated") merges.push(s.proposed_commit);
   if (s.integrated_commit && !merges.includes(s.integrated_commit)) merges.push(s.integrated_commit);
   if (!snaps.length && !merges.length) { $("#tab").innerHTML = `<div class="empty">No snapshot yet: the agent has not finished a round.</div>`; return }
   const opts = snaps.map(x => `<option value="seq:${x.seq}">#${x.seq} ${esc(x.label)}${s.best_snapshot?.seq === x.seq ? " (best)" : ""}</option>`).reverse()
-    .concat(merges.map(c => `<option value="merge:${c}">${c === s.integrated_commit ? "integrated commit" : "merge result"} ${c.slice(0, 10)}</option>`).reverse());
+    .concat(merges.map(c => `<option value="merge:${c}">${c === s.integrated_commit ? "integrated commit" : c === s.proposed_commit ? "what would land (merge result)" : "merge result"} ${c.slice(0, 10)}</option>`).reverse());
   const approval = s.phase === "Escalated" && s.reason === "AwaitingApproval" && can("operator");
-  $("#tab").innerHTML = `${approval ? `<section class="card" style="border-color:var(--warn)"><h3>Approval</h3><p>This change passed every gate on the merge result and waits for you. Review the merge-result diff below, then:</p>
+  $("#tab").innerHTML = `${approval ? `<section class="card" style="border-color:var(--warn)"><h3>Approval</h3><p>The merge result passed every gate and waits for you. Below is exactly what would land on <code>${esc(t.spec.base_ref.replace("refs/heads/", ""))}</code>; review it, then:</p>
      <div class="actions"><button class="btn primary" id="approveBtn">Approve and integrate</button><button class="btn" id="hintBtn">Request changes (hint)…</button></div></section>` : ""}
    <div class="actions"><label class="hint">Show <select id="dsel">${opts.join("")}</select></label>
    <label class="hint">against <select id="dfrom"><option value="">its base</option>${snaps.map(x => `<option value="${x.seq}">#${x.seq} ${esc(x.label)}</option>`).reverse().join("")}</select></label>
@@ -373,7 +374,8 @@ async function tabChanges(r, t) {
   if (approval) {
     $("#approveBtn").onclick = async () => { if (confirm("Integrate this change into " + t.spec.base_ref.replace("refs/heads/", "") + "?")) await command(r, t.id, "approve") };
     $("#hintBtn").onclick = () => taskAction("hint", r, t);
-    if (merges.length) $("#dsel").value = "merge:" + merges[merges.length - 1];
+    if (s.proposed_commit) $("#dsel").value = "merge:" + s.proposed_commit;
+    else if (merges.length) $("#dsel").value = "merge:" + merges[merges.length - 1];
   }
   const loadD = async () => {
     const [k, v] = $("#dsel").value.split(":"); const from = $("#dfrom").value;
@@ -477,7 +479,7 @@ async function tabLogs(r, t) {
   $$("[data-view]").forEach(a => a.onclick = async e => {
     e.preventDefault(); const x = rows[+a.dataset.view];
     const txt = await fetch(`/api/repos/${enc(r)}/artifacts/${enc(x.a.digest)}?tail=200000`).then(r => r.text()).catch(e => e.message);
-    $("#logView").innerHTML = `<h3 class="sec">${esc(x.gate)} · ${esc(x.round)}${x.a.size > 200000 ? " (last 200 KB)" : ""}</h3><pre class="log">${esc(txt)}</pre>`;
+    $("#logView").innerHTML = `<h3 class="sec">${esc(x.gate)} · ${esc(x.round)}${x.a.size > 200000 ? " (last 200 KB)" : ""}</h3><pre class="log">${txt ? esc(txt) : '<span class="muted">(the tool printed nothing)</span>'}</pre>`;
   });
 }
 
@@ -644,7 +646,7 @@ function planEditor(el, readonly) {
      <div class="row2"><label>Scope (one glob per line)<textarea data-k="scope" ${ro} style="min-height:50px">${esc((t.scope || []).join("\n"))}</textarea></label>
      <label>After (ids)<textarea data-k="after" ${ro} style="min-height:50px">${esc((t.after || []).join("\n"))}</textarea></label>
      <label>Agent / gates<input data-k="agent" value="${esc(t.agent || "")}" placeholder="default agent" ${ro}><input data-k="gates" value="${esc((t.gates || []).join(", "))}" placeholder="all gates" ${ro}></label></div>
-     <div class="issues" data-iss="${esc(t.id)}"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
+     <div class="issues"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
    ${readonly ? `<p class="hint">${!can("operator") ? "Read-only." : "This plan was already handled."}</p>` : `<div class="actions"><button class="btn" id="padd">+ Add task</button><button class="btn" id="pexport">Export JSON</button>
      <label class="check hint"><input type="checkbox" id="pappr"> hold every task for my approval</label><button class="btn primary" id="psubmit">Submit ${p.tasks.length} task(s)</button>
      ${p.plan_task ? `<button class="btn" id="preplan">Ask the planner again…</button>` : ""}</div>`}`;
@@ -658,9 +660,9 @@ function planEditor(el, readonly) {
     sync();
     try {
       const j = await send("POST", `/api/repos/${enc(p.repo)}/plans/validate`, { plan: { tasks: p.tasks.map(clean), notes: p.notes }, base: p.base || "" });
-      const global = j.issues.filter(x => !x.task || !p.tasks.some(t => t.id === x.task));
+      const global = j.issues.filter(x => !x.task || !p.tasks.some((t, i) => (t.id || `#${i + 1}`) === x.task));
       $("#pissues", el).innerHTML = (j.ok ? `<div class="pass">✓ spec.validate: no errors${j.issues.length ? `, ${j.issues.length} warning(s)` : ""}</div>` : `<div class="fail">✗ spec.validate found errors</div>`) + global.map(issue).join("");
-      $$("[data-iss]", el).forEach(d => d.innerHTML = j.issues.filter(x => x.task === d.dataset.iss).map(issue).join(""));
+      $$(".ptask", el).forEach(div => { const id = p.tasks[+div.dataset.i]?.id || `#${+div.dataset.i + 1}`; $(".issues", div).innerHTML = j.issues.filter(x => x.task === id).map(issue).join("") });
       const s = $("#psubmit", el); if (s) s.disabled = !j.ok;
       drawPlanGraph($("#pgraph", el), p.tasks);
     } catch (e) { $("#pissues", el).innerHTML = `<div class="fail">${esc(e.message)}</div>` }
@@ -933,7 +935,7 @@ async function settingsNotify() {
   $("#ntf").className = "";
   $("#ntf").innerHTML = `${n.error ? `<p class="fail">${esc(n.error)}</p>` : ""}<form class="f" id="nf"><div class="gatechecks">${kinds.map(k => `<label class="check"><input type="checkbox" name="ev" value="${k}" ${on.includes(k) ? "checked" : ""}> ${k}</label>`).join("")}</div>
    <label class="check"><input type="checkbox" name="desktop" ${c.desktop ? "checked" : ""}> Desktop notifications on the machine running Spine (notify-send / osascript)</label>
-   <label>Webhooks (one URL per line; Slack-compatible <code>{"text"}</code>; append <code> generic</code> for a JSON event)<textarea name="hooks" style="min-height:60px">${esc((c.webhooks || []).map(w => w.url + (w.format === "generic" ? " generic" : "")).join("\n"))}</textarea></label>
+   <label><span>Webhooks — one URL per line. Slack-compatible <code>{"text"}</code> payloads; add <code>generic</code> after a URL for a JSON event.</span><textarea name="hooks" style="min-height:60px">${esc((c.webhooks || []).map(w => w.url + (w.format === "generic" ? " generic" : "")).join("\n"))}</textarea></label>
    <div class="row"><label>Email: SMTP host<input name="host" value="${esc(c.email?.host || "")}"></label><label>Port<input name="port" type="number" value="${c.email?.port || ""}" placeholder="587"></label></div>
    <div class="row"><label>Username<input name="user" value="${esc(c.email?.username || "")}"></label><label>Password environment variable<input name="penv" value="${esc(c.email?.password_env || "")}" placeholder="SPINE_SMTP_PASSWORD"></label></div>
    <div class="row"><label>From<input name="from" value="${esc(c.email?.from || "")}"></label><label>To (comma-separated)<input name="to" value="${esc((c.email?.to || []).join(", "))}"></label></div>

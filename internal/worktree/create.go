@@ -110,13 +110,16 @@ func (m *Manager) discardRequested(ctx context.Context, l Lease) error {
 	if registered, err := m.isRegistered(ctx, l.Path); err != nil {
 		errs = append(errs, err)
 	} else if registered && validCheckout(l.Path) {
-		if _, err := m.git(ctx, m.primary, nil, "worktree", "remove", "--force", "--force", l.Path); err != nil {
-			errs = append(errs, err)
-		}
+		// Best effort: a `git worktree add` killed mid-way can leave a .git
+		// file git's own validation rejects ("is not a .git file") even
+		// though it names an existing gitdir (found by the chaos harness).
+		// The directory removal and registration purge below finish the job,
+		// so a failure here is not an error.
+		m.git(ctx, m.primary, nil, "worktree", "remove", "--force", "--force", l.Path)
 	}
-	// A killed `git worktree add` can leave a registered path with no .git
-	// file, which `worktree remove` rejects; the directory is deleted and the
-	// registration pruned below.
+	// A killed `git worktree add` can also leave a registered path with no
+	// .git file, which `worktree remove` rejects; the directory is deleted
+	// and the registration pruned below.
 	if _, statErr := os.Stat(l.Path); statErr == nil {
 		errs = append(errs, os.RemoveAll(l.Path))
 	}

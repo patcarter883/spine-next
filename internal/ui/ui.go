@@ -282,7 +282,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusForbidden, "missing X-Spine header")
 			return
 		}
-		if s.ReadOnly && r.URL.Path != "/api/login" && r.URL.Path != "/api/logout" {
+		if s.ReadOnly && r.URL.Path != "/api/login" && r.URL.Path != "/api/logout" && !strings.HasSuffix(r.URL.Path, "/plans/validate") {
 			httpError(w, http.StatusForbidden, "this dashboard is read-only")
 			return
 		}
@@ -292,7 +292,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	ctx = context.WithValue(ctx, auditKey{}, n)
 	sw := &statusWriter{ResponseWriter: w, code: 200}
 	s.mux.ServeHTTP(sw, r.WithContext(ctx))
-	if mutating && r.URL.Path != "/api/login" && r.URL.Path != "/api/logout" {
+	if mutating && r.URL.Path != "/api/login" && r.URL.Path != "/api/logout" && !strings.HasSuffix(r.URL.Path, "/plans/validate") {
 		s.audit(AuditEntry{At: time.Now().UTC(), User: id.Name, Role: string(id.Role), Authenticated: id.Authenticated,
 			Remote: r.RemoteAddr, Method: r.Method, Path: r.URL.Path, Status: sw.code, Repo: n.repo, Task: n.task, Detail: n.detail})
 	}

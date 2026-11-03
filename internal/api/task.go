@@ -248,6 +248,13 @@ type Status struct {
 	TokensUsed         int64         `json:"tokens_used"`
 	StartedAt          time.Time     `json:"started_at,omitempty"`
 	IntegratedCommit   string        `json:"integrated_commit,omitempty"`
+	// ProposedCommit is the merge commit that would land, recorded while
+	// the task waits for approval (its tree passed the gates).
+	ProposedCommit string `json:"proposed_commit,omitempty"`
+	// ApprovedTree is the snapshot tree a person approved. Approval covers
+	// that change only: a later round or attempt asks again (a moved base
+	// alone does not; the merge result is re-gated either way).
+	ApprovedTree string `json:"approved_tree,omitempty"`
 	// Hints are typed notes from a person, given to the next agent round.
 	Hints []Hint `json:"hints,omitempty"`
 	// ResumeFrom, when set on a Pending task, is a snapshot the next attempt

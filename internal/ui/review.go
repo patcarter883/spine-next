@@ -77,7 +77,7 @@ func (s *Server) diff(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case q.Get("merge") != "":
 		c := q.Get("merge")
-		known := c == t.Status.IntegratedCommit
+		known := c == t.Status.IntegratedCommit || c == t.Status.ProposedCommit
 		for _, g := range append(t.Status.GateHistory, derefGate(t.Status.LastGate)...) {
 			known = known || (g.OnMerge && g.Commit == c)
 		}

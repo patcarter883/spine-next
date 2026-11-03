@@ -132,7 +132,7 @@ func Validate(p api.Plan, env Env) []Issue {
 				continue
 			}
 			if len(env.Files) > 0 && strings.ContainsAny(g, "*?[") && !matchesAny(g, env.Files) && !dirExists(g, env.Files) {
-				add(Warning, label, "scope", "%q matches no file at the base", g)
+				add(Warning, label, "scope", "%q is under a directory that does not exist at the base (fine if the task creates it; check for a typo)", g)
 			}
 		}
 		if t.Agent != "" && len(env.Agents) > 0 && !contains(env.Agents, t.Agent) {
@@ -378,8 +378,17 @@ func matchesAny(g string, files []string) bool {
 	return false
 }
 
+// dirExists reports whether the directory holding the glob's literal
+// prefix exists at the base ("pkg/limiter*" → pkg/).
 func dirExists(g string, files []string) bool {
-	p := strings.TrimSuffix(literalPrefix(g), "/")
+	p := literalPrefix(g)
+	if !strings.HasSuffix(p, "/") {
+		p = path.Dir(p)
+		if p == "." {
+			return true
+		}
+	}
+	p = strings.TrimSuffix(p, "/")
 	if p == "" {
 		return true
 	}

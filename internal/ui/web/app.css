@@ -65,7 +65,7 @@ pre.log{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 form.f{display:grid;gap:12px;max-width:780px}form.f label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
 form.f textarea{min-height:120px;resize:vertical}form.f .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}form.f .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
 @media (max-width:640px){form.f .row,form.f .row3{grid-template-columns:1fr}}
-.check{display:flex;gap:8px;align-items:center;color:var(--fg)!important}.err{color:var(--bad);font-size:13px;min-height:1em;white-space:pre-wrap}.hint{font-size:12px;color:var(--muted)}
+.check,form.f label.check{display:flex;gap:8px;align-items:center;color:var(--fg)!important}form.f .gatechecks label.check{display:inline-flex;align-items:baseline}.err{color:var(--bad);font-size:13px;min-height:1em;white-space:pre-wrap}.hint{font-size:12px;color:var(--muted)}
 .gatechecks{display:flex;flex-wrap:wrap;gap:6px 14px}
 /* diff */
 .files{font-size:12px;margin:8px 0}.files td{padding:2px 6px}.files a{text-decoration:none}
@@ -96,7 +96,7 @@ svg text{font-family:system-ui,sans-serif}
 .gnode rect{stroke:var(--line);stroke-width:1}.gnode{cursor:pointer}.gnode.crit rect{stroke:var(--crit);stroke-width:2.5}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:8px 0;align-items:center}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 /* charts */
-.chart{width:100%;height:auto;display:block}.chart .gridl{stroke:var(--line);stroke-width:1}.chart .axis{fill:var(--muted);font-size:10px}
+.chart{width:100%;max-width:960px;height:auto;max-height:260px;display:block}.chart .gridl{stroke:var(--line);stroke-width:1}.chart .axis{fill:var(--muted);font-size:10px}
 .bars{display:grid;gap:4px}.hbar{display:grid;grid-template-columns:minmax(120px,40%) 1fr 48px;gap:8px;align-items:center;font-size:12px}
 .hbar .track{height:10px;background:transparent}.hbar .fillb{height:10px;border-radius:0 4px 4px 0;background:var(--s1)}
 .gauge{height:12px;background:var(--line);border-radius:6px;overflow:hidden;margin:4px 0}.gauge>div{height:100%;background:var(--s1);border-radius:0 6px 6px 0}

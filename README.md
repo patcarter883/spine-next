@@ -43,7 +43,7 @@ Other commands:
 | `spine approve ID` | Integrate a task submitted with `--require-approval`. |
 | `spine retry ID` | Give an escalated or failed task one more fresh attempt. |
 | `spine cancel ID` | Stop the agent and release the worktree. |
-| `spine ui` | A web dashboard on `http://127.0.0.1:8765`, loopback only because it has no auth. It shows tasks, gate results and timelines, and can approve, retry or cancel. Pages update live over SSE. It reads the database read-only; commands go through the same inbox as the CLI. |
+| `spine ui` | A web dashboard on `http://127.0.0.1:8765`, loopback only because it has no auth. It shows tasks, gate results and timelines; it can create tasks (**+ New task**, with the same options and repository defaults as `spine run`) and approve, retry or cancel them. Pages update live over SSE. It reads the database read-only; commands go through the same inbox as the CLI. |
 | `spine controller` | Run the controller in the foreground. It reconciles every task and resumes after a crash or `kill -9`. |
 | `spine recover` | Repair state after a crash. |
 | `spine gc` | Checkpoint the SQLite WAL. |

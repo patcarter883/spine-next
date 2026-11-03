@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -30,21 +27,6 @@ type multi []string
 
 func (m *multi) String() string     { return strings.Join(*m, ",") }
 func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
-
-var reSlug = regexp.MustCompile(`[^a-z0-9]+`)
-
-func newTaskID(intent string) api.TaskID {
-	s := strings.Trim(reSlug.ReplaceAllString(strings.ToLower(intent), "-"), "-")
-	if len(s) > 32 {
-		s = strings.Trim(s[:32], "-")
-	}
-	if s == "" {
-		s = "task"
-	}
-	var b [3]byte
-	rand.Read(b[:])
-	return api.TaskID(s + "-" + hex.EncodeToString(b[:]))
-}
 
 // controllerRunning reports whether another process holds the store.
 func controllerRunning(repo string) (bool, string, string, error) {
@@ -92,29 +74,17 @@ func runRun(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	spec := api.Spec{Title: *title, Intent: intent, BaseRef: cfg.Base, Scope: scope, Adapter: *adapter, Budget: cfg.Budget}
-	if *base != "" {
-		spec.BaseRef = config.FullRef(*base)
-	}
-	if *attempts > 0 {
-		spec.Budget.MaxAttempts = *attempts
-	}
-	if *rounds > 0 {
-		spec.Budget.MaxPatchRounds = *rounds
-	}
-	if *timeout > 0 {
-		spec.Budget.PerRunTimeout = *timeout
-	}
-	spec.Escalation.RequireApprovalBeforeMerge = *approve
-	for _, d := range deps {
-		spec.DependsOn = append(spec.DependsOn, api.TaskID(d))
-	}
-	if err := api.ValidateSpec(spec); err != nil {
+	spec, err := cfg.NewSpec(config.TaskInput{Title: *title, Intent: intent, Base: *base, Scope: scope, After: deps,
+		Agent: *adapter, RequireApproval: *approve, MaxAttempts: *attempts, MaxRounds: *rounds, RunTimeout: *timeout})
+	if err != nil {
 		return err
 	}
 	tid := api.TaskID(*id)
 	if tid == "" {
-		tid = newTaskID(intent)
+		tid = api.NewTaskID(intent)
+	}
+	if !api.ValidTaskID(tid) {
+		return fmt.Errorf("run: task id %q must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}", tid)
 	}
 	running, db, cd, err := controllerRunning(*repo)
 	if err != nil {

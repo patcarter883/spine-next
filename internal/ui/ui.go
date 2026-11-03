@@ -14,9 +14,11 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
 )
@@ -65,6 +67,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/repos/{repo}/tasks/{id}/events", s.events)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("POST /api/repos/{repo}/tasks/{id}/{action}", s.command)
+	mux.HandleFunc("POST /api/repos/{repo}/tasks", s.create)
+	mux.HandleFunc("GET /api/repos/{repo}/defaults", s.defaults)
 	return mux
 }
 
@@ -242,4 +246,88 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"queued": cid, "controller": repo.State == "running"})
+}
+
+// - Creating tasks -
+
+type createRequest struct {
+	ID string `json:"id"`
+	config.TaskInput
+}
+
+func httpError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// defaults returns what the new-task form pre-fills for a repository.
+func (s *Server) defaults(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	cfg, err := config.Load(repo.Path)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"base": strings.TrimPrefix(cfg.Base, "refs/heads/"), "agent": cfg.Agent, "agents": cfg.AdapterNames(),
+		"max_attempts": cfg.Budget.MaxAttempts, "max_rounds": cfg.Budget.MaxPatchRounds,
+	})
+}
+
+// create builds a spec from the form with the repository's own defaults
+// (the same code as `spine run`) and submits it through the repository's
+// inbox, so the controller stays the database's only writer.
+func (s *Server) create(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Spine") != "1" {
+		httpError(w, http.StatusForbidden, "missing X-Spine header")
+		return
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		httpError(w, http.StatusUnsupportedMediaType, "send JSON")
+		return
+	}
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	var req createRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "bad request: "+err.Error())
+		return
+	}
+	cfg, err := config.Load(repo.Path)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	spec, err := cfg.NewSpec(req.TaskInput)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := api.TaskID(strings.TrimSpace(req.ID))
+	if id == "" {
+		id = api.NewTaskID(spec.Intent)
+	}
+	if !api.ValidTaskID(id) {
+		httpError(w, http.StatusBadRequest, "task id must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+		return
+	}
+	if _, err := repo.Store.GetTask(r.Context(), id); err == nil {
+		httpError(w, http.StatusConflict, "a task with this id already exists")
+		return
+	}
+	if _, err := inbox.Write(repo.InboxDir, inbox.Command{Kind: inbox.Submit, Task: id, Spec: &spec, By: "ui"}); err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"id": id, "repo": repo.Name, "controller": repo.State == "running"})
 }

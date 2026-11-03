@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -225,4 +226,77 @@ func FullRef(s string) string {
 		return s
 	}
 	return "refs/heads/" + s
+}
+
+// TaskInput is what a person asks for when creating a task (CLI flags or
+// the dashboard form). Zero fields take the repository's defaults.
+type TaskInput struct {
+	Title           string        `json:"title"`
+	Intent          string        `json:"intent"`
+	Base            string        `json:"base"`  // branch or full ref
+	Scope           []string      `json:"scope"` // path globs; empty = everything
+	After           []string      `json:"after"` // "task" or "repo:task"
+	Agent           string        `json:"agent"` // adapter name
+	RequireApproval bool          `json:"require_approval"`
+	MaxAttempts     int           `json:"max_attempts"`
+	MaxRounds       int           `json:"max_rounds"`
+	RunTimeout      time.Duration `json:"-"`
+}
+
+// NewSpec builds and validates a task spec from input and this
+// repository's defaults. The CLI and the dashboard share it.
+func (c Config) NewSpec(in TaskInput) (api.Spec, error) {
+	in.Intent = strings.TrimSpace(in.Intent)
+	if in.Intent == "" {
+		return api.Spec{}, fmt.Errorf("the task needs an intent")
+	}
+	spec := api.Spec{Title: strings.TrimSpace(in.Title), Intent: in.Intent, BaseRef: c.Base, Budget: c.Budget}
+	if b := strings.TrimSpace(in.Base); b != "" {
+		spec.BaseRef = FullRef(b)
+	}
+	for _, g := range in.Scope {
+		if g = strings.TrimSpace(g); g != "" {
+			spec.Scope = append(spec.Scope, g)
+		}
+	}
+	for _, d := range in.After {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if !api.ValidDependency(api.TaskID(d)) {
+			return api.Spec{}, fmt.Errorf("dependency %q is not a task id or repo:task", d)
+		}
+		spec.DependsOn = append(spec.DependsOn, api.TaskID(d))
+	}
+	if a := strings.TrimSpace(in.Agent); a != "" {
+		if _, ok := c.Adapters[a]; !ok {
+			return api.Spec{}, fmt.Errorf("unknown agent %q (configured: %s)", a, strings.Join(c.AdapterNames(), ", "))
+		}
+		spec.Adapter = a
+	}
+	if in.MaxAttempts < 0 || in.MaxRounds < 0 {
+		return api.Spec{}, fmt.Errorf("attempts and rounds must not be negative")
+	}
+	if in.MaxAttempts > 0 {
+		spec.Budget.MaxAttempts = in.MaxAttempts
+	}
+	if in.MaxRounds > 0 {
+		spec.Budget.MaxPatchRounds = in.MaxRounds
+	}
+	if in.RunTimeout > 0 {
+		spec.Budget.PerRunTimeout = in.RunTimeout
+	}
+	spec.Escalation.RequireApprovalBeforeMerge = in.RequireApproval
+	return spec, api.ValidateSpec(spec)
+}
+
+// AdapterNames lists configured agent adapters, sorted.
+func (c Config) AdapterNames() []string {
+	var out []string
+	for n := range c.Adapters {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }

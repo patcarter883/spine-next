@@ -123,3 +123,72 @@ func TestMultiRepoUI(t *testing.T) {
 		t.Fatalf("pushes %d", got)
 	}
 }
+
+func TestCreateTask(t *testing.T) {
+	a := newRepo(t, "exists")
+	path := t.TempDir() // a repository path with no .spine/config.yaml: built-in defaults
+	src := SourceFunc(func(context.Context) []Repo {
+		return []Repo{{Name: "alpha", Path: path, State: "running", Store: a.ro, InboxDir: a.inbox}}
+	})
+	srv := httptest.NewServer((&Server{Source: src}).Handler())
+	defer srv.Close()
+	post := func(body string, hdr map[string]string) (*http.Response, map[string]any) {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/repos/alpha/tasks", strings.NewReader(body))
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		return r, m
+	}
+	ok := map[string]string{"X-Spine": "1", "Content-Type": "application/json"}
+
+	if r, _ := post(`{"intent":"x"}`, map[string]string{"Content-Type": "application/json"}); r.StatusCode != 403 {
+		t.Fatalf("no header: %d", r.StatusCode)
+	}
+	if r, _ := post(`intent=x`, map[string]string{"X-Spine": "1", "Content-Type": "application/x-www-form-urlencoded"}); r.StatusCode != 415 {
+		t.Fatalf("form post: %d", r.StatusCode)
+	}
+	for body, want := range map[string]string{
+		`{"intent":"   "}`:                   "intent",
+		`{"intent":"x","after":["bad id!"]}`: "dependency",
+		`{"intent":"x","agent":"nope"}`:      "unknown agent",
+		`{"intent":"x","id":"exists"}`:       "already exists",
+		`{"intent":"x","id":"no spaces"}`:    "task id",
+		`{"intent":"x","surprise":1}`:        "unknown field",
+		`{"intent":"x","max_attempts":-1}`:   "negative",
+	} {
+		r, m := post(body, ok)
+		if r.StatusCode < 400 || !strings.Contains(m["error"].(string), want) {
+			t.Errorf("%s: %d %v", body, r.StatusCode, m)
+		}
+	}
+	if es, _ := inbox.List(a.inbox); len(es) != 0 {
+		t.Fatalf("rejected requests reached the inbox: %+v", es)
+	}
+
+	r, m := post(`{"intent":"Add a /health endpoint","scope":["api/**"," "],"after":["exists","other:t1"],"base":"develop","require_approval":true,"max_rounds":5}`, ok)
+	if r.StatusCode != 200 || m["repo"] != "alpha" || !strings.HasPrefix(m["id"].(string), "add-a-health-endpoint-") || m["controller"] != true {
+		t.Fatalf("%d %v", r.StatusCode, m)
+	}
+	es, _ := inbox.List(a.inbox)
+	if len(es) != 1 || es[0].Kind != inbox.Submit || string(es[0].Task) != m["id"] || es[0].By != "ui" {
+		t.Fatalf("inbox %+v", es)
+	}
+	sp := es[0].Spec
+	if sp.BaseRef != "refs/heads/develop" || len(sp.Scope) != 1 || len(sp.DependsOn) != 2 || !sp.Escalation.RequireApprovalBeforeMerge ||
+		sp.Budget.MaxPatchRounds != 5 || sp.Budget.MaxAttempts != 2 {
+		t.Fatalf("spec %+v", sp)
+	}
+
+	r2, _ := http.Get(srv.URL + "/api/repos/alpha/defaults")
+	var d map[string]any
+	json.NewDecoder(r2.Body).Decode(&d)
+	if d["base"] != "main" || d["agent"] != "claude" || d["max_attempts"].(float64) != 2 {
+		t.Fatalf("defaults %v", d)
+	}
+}

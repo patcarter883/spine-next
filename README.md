@@ -56,6 +56,58 @@ What the controller guarantees:
 - **Failures escalate rather than loop.** Budgets (attempts, rounds, wall clock, tokens) are enforced as a closed set of legal supervisor actions; when none is left, the task escalates to you with its worktree kept.
 - **Your checkout is never touched mid-edit.** If `main` is checked out with uncommitted changes to tracked files, integration waits instead of overwriting them.
 
+## Local models with Pi
+
+Spine can run the [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (`@earendil-works/pi-coding-agent`) as the worker through Pi's RPC mode. Pi works with local OpenAI-compatible servers such as vLLM, SGLang, llama.cpp and Ollama. Add an adapter to `.spine/config.yaml`:
+
+```yaml
+agent: pi
+adapters:
+  pi:
+    protocol: pi-rpc
+    version: 1.5.0              # required; Spine refuses any other version
+    model: vllm/qwen3-coder-30b # provider/id from Pi's models.json
+    tool_timeout: 10m           # default 10m
+    max_turns: 80               # default 80
+    container:
+      image: spine-pi:1.5.0     # docker build -t spine-pi:1.5.0 contrib/pi
+      network: host             # so the container reaches a model server on the host
+      args: [--memory, 8g, --cpus, "4"]
+```
+
+Point Pi at the model server in `~/.pi/agent/models.json` (or the directory in `PI_CODING_AGENT_DIR`):
+
+```json
+{"providers": {"vllm": {"baseUrl": "http://127.0.0.1:8000/v1", "api": "openai-completions", "apiKey": "unused",
+  "models": [{"id": "qwen3-coder-30b", "contextWindow": 65536, "maxTokens": 8192}]}}}
+```
+
+Then run `spine doctor --agent`. It checks the pinned version and that Pi starts in RPC mode and resolves the model, without sending a prompt.
+
+Pi has no sandbox, never asks for approval, has no default timeout for shell commands and no turn limit, and a failed run can still exit 0. Spine adds each guardrail from outside the process:
+
+| Risk | Guardrail |
+|---|---|
+| No sandbox or approvals | Each run gets a fresh container: `--rm`, your uid, `HOME` in the container, only the task worktree and its private git dir writable, the shared git dir read-only. Agent environment goes through a 0600 env file, not the command line. The container is force-removed after the run, and a restarted controller removes any its predecessor left behind (labelled per repository). `spine doctor` warns when a Pi adapter has no container. |
+| Host credentials | Containerized runs get a private copy of `models.json` and `settings.json` only, never `auth.json`, sessions or extensions. Pass a local server's key as an environment variable referenced in `models.json`. |
+| Planted extensions | Pi starts with `--no-session --no-approve --no-extensions --no-skills --no-prompt-templates --no-themes --no-mcp`, so files a worker writes into the repository (`.pi/…`) are never loaded by a later round. |
+| Shell commands with no timeout | A tool call running past `tool_timeout` is aborted and the same session is told to continue without it. After the third such timeout the run ends. |
+| No turn limit | Over `max_turns` assistant turns, the run is aborted with `BudgetExceeded`. |
+| Runaway spend | Tokens and cost come from Pi's own accounting, both per message and from `get_session_stats` at the end. Exceeding the task's token budget aborts the run. |
+| Hangs | No protocol activity for `stall_timeout` (default 15m) aborts the run. At 80% of the run timeout Pi is steered to wrap up, and at 100% the run is aborted. If an abort isn't honoured within 20 s, the process group is killed. |
+| "Exit 0" failures | The outcome comes from the final assistant message's `stopReason` and `agent_settled`, never the exit code. `error` (including exhausted provider retries) counts as a crash, and `length` as budget exceeded. |
+| Breaking minor releases | `version` is required and checked against `pi --version`, inside the container when one is configured. A different binary fails fast with "found X, but the adapter pins Y". |
+
+How this was tested:
+
+- **Fake Pi:** a scripted Pi (`internal/agent/fakepi`) covers every guardrail, plus the controller loop with a feedback round.
+- **Real Pi:** Pi 1.5.0 itself ran against an OpenAI-compatible fake model server (`internal/agent/pireal_test.go`, enabled by `SPINE_PI_BIN` / `SPINE_PI_IMAGE`):
+  - It wrote files and completed.
+  - A `sleep 600` was aborted by the tool timeout and the session finished the task.
+  - In a container, files were owned by the user, a write to `../escape.txt` never reached the host, and orphaned containers were reaped per repository.
+- **CI:** CI runs the real-Pi tests on every push.
+- **Not tested:** a real local model (vLLM etc.) hasn't been run; the model server in tests is a scripted stand-in.
+
 ## Several repositories: `spine supervisor`
 
 One process can run Spine for every repository you register. Storage stays per repository: each keeps its own database, writer lock, inbox, worktrees and crash recovery in its own `.git`, exactly as with `spine controller`.

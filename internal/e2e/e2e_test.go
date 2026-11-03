@@ -26,7 +26,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/testrepo"
 )
 
-var fakeBin string
+var fakeBin, fakePiBin string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "e2e-fakeacp-")
@@ -35,6 +35,10 @@ func TestMain(m *testing.M) {
 	}
 	fakeBin = filepath.Join(dir, "fakeacp")
 	if out, err := exec.Command("go", "build", "-o", fakeBin, "../agent/fakeacp").CombinedOutput(); err != nil {
+		panic(string(out))
+	}
+	fakePiBin = filepath.Join(dir, "fakepi")
+	if out, err := exec.Command("go", "build", "-o", fakePiBin, "../agent/fakepi").CombinedOutput(); err != nil {
 		panic(string(out))
 	}
 	code := m.Run()

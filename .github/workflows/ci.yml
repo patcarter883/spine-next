@@ -19,14 +19,19 @@ jobs:
       # Toolchains the M1 corpus runs for real (RFC §10, M1 exit criterion).
       - run: pip install pytest ruff
       - run: npm install -g typescript@6 eslint@10
+      # Real Pi (pinned) for the pi-rpc adapter tests, on the host and in a container.
+      - run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.5.0 && pi --version
+      - run: docker build -t spine-pi:1.5.0 --build-arg PI_VERSION=1.5.0 contrib/pi
       - run: php --version && git version
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       # The pure-Go build must keep working: tree-sitter tools report
       # ErrUnavailable without CGO (RFC §8.1).
       - run: CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go build ./cmd/spine
+      - run: echo "SPINE_PI_BIN=$(command -v pi)" >> "$GITHUB_ENV"
       - run: go test -race -count=1 ./...
         env:
           CGO_ENABLED: "1"
           SPINE_CHAOS_ITERS: "40"
           SPINE_CORPUS_REQUIRE: "1"
+          SPINE_PI_IMAGE: spine-pi:1.5.0

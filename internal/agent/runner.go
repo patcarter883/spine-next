@@ -41,6 +41,27 @@ type Adapter struct {
 	Permissions string `yaml:"permissions"`
 	// StallTimeout cancels a run with no protocol traffic for this long.
 	StallTimeout time.Duration `yaml:"stall_timeout"`
+
+	// Protocol is "acp" (default; Claude Code and other ACP agents) or
+	// "pi-rpc" (the Pi coding agent's RPC mode).
+	Protocol string `yaml:"protocol"`
+	// Version pins the agent: Spine runs `<argv[0]> --version` before the
+	// first run and refuses any other version (required for pi-rpc, whose
+	// breaking changes land in minor releases).
+	Version string `yaml:"version"`
+	// Model and Provider select the model (pi-rpc: --model/--provider).
+	Model    string `yaml:"model"`
+	Provider string `yaml:"provider"`
+	// Args are appended to the agent's command line.
+	Args []string `yaml:"args"`
+	// ToolTimeout aborts one tool call (shell command) that runs longer;
+	// the session continues with a note (pi-rpc). Default 10m.
+	ToolTimeout time.Duration `yaml:"tool_timeout"`
+	// MaxTurns stops a run after this many assistant turns (pi-rpc).
+	// Default 80.
+	MaxTurns int `yaml:"max_turns"`
+	// Container runs every agent process in a fresh container.
+	Container *Container `yaml:"container"`
 }
 
 // DefaultPassEnv covers credentials and network settings agents need.
@@ -89,6 +110,9 @@ type RunRequest struct {
 // Runner runs agents.
 type Runner struct {
 	Procs ProcRunner
+	// WorktreeRoot labels agent containers so a restarted controller can
+	// remove the ones it left behind.
+	WorktreeRoot string
 	// Version is reported to the agent in clientInfo.
 	Version string
 }
@@ -101,6 +125,14 @@ var ErrProtocol = errors.New("agent: protocol error")
 // only for faults outside the agent (cannot spawn, cannot record the
 // process); an agent that crashes or misbehaves is an Outcome.
 func (r *Runner) Run(ctx context.Context, req RunRequest) (api.Outcome, error) {
+	switch req.Adapter.Protocol {
+	case "", "acp":
+	case "pi-rpc":
+		return r.runPi(ctx, req)
+	default:
+		return api.Outcome{Attempt: req.Prompt.Attempt, Round: req.Prompt.Round},
+			fmt.Errorf("agent: adapter %q: unknown protocol %q", req.Adapter.Name, req.Adapter.Protocol)
+	}
 	start := time.Now()
 	out := api.Outcome{Attempt: req.Prompt.Attempt, Round: req.Prompt.Round}
 	a := req.Adapter
@@ -135,9 +167,20 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (api.Outcome, error) {
 		err error
 	}
 	doneCh := make(chan procDone, 1)
+	argv, env := append(append([]string{}, a.Argv...), a.Args...), buildEnv(a)
+	if a.Container != nil {
+		wr, err := a.Container.wrap(RootLabel(r.WorktreeRoot), cwd, req.Lease.TaskID, req.Prompt.Attempt, req.Prompt.Round, argv, env, nil, nil)
+		if err != nil {
+			inR.Close()
+			inW.Close()
+			return out, err
+		}
+		defer a.Container.cleanup(wr)
+		argv, env = wr.argv, wr.env
+	}
 	go func() {
 		res, err := r.Procs.Run(runCtx, req.Lease, exec.Cmd{
-			Argv: a.Argv, Dir: cwd, Env: buildEnv(a), StdinFile: inR, Stdout: outW, Stderr: &stderr,
+			Argv: argv, Dir: cwd, Env: env, StdinFile: inR, Stdout: outW, Stderr: &stderr,
 			Grace: 5 * time.Second,
 		})
 		outW.Close()

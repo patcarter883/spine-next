@@ -168,6 +168,8 @@ type Outcome struct {
 	ExitCode   int           `json:"exit_code"`
 	Signal     string        `json:"signal,omitempty"`
 	TokensUsed int64         `json:"tokens_used"`
+	CostUSD    float64       `json:"cost_usd,omitempty"`
+	Turns      int           `json:"turns,omitempty"`
 	Duration   time.Duration `json:"duration_ns"`
 	Message    string        `json:"message,omitempty"` // bounded
 }

@@ -47,17 +47,55 @@ func Agent(ctx context.Context, repoDir string, probe bool) []Finding {
 		add(OK, "gates", "%s", strings.Join(gc.Order, ", "))
 	}
 	a := cfg.Adapters[cfg.Agent]
-	if _, err := osexec.LookPath(a.Argv[0]); err != nil {
+	if a.Container != nil {
+		rt := a.Container.Runtime
+		if rt == "" {
+			rt = "docker"
+		}
+		if _, err := osexec.LookPath(rt); err != nil {
+			add(Fail, "agent", "container runtime %s not found on PATH", rt)
+			return out
+		}
+		add(OK, "agent", "%s: %s in container %s (network %s)", a.Name, strings.Join(a.Argv, " "), a.Container.Image, orDefault(a.Container.Network, "host"))
+	} else if _, err := osexec.LookPath(a.Argv[0]); err != nil {
 		hint := ""
+		if a.Protocol == "pi-rpc" {
+			hint = " (install the pinned version: npm install -g @earendil-works/pi-coding-agent@" + a.Version + ")"
+		}
 		if a.Argv[0] == "claude-agent-acp" {
 			hint = " (install: npm install -g @agentclientprotocol/claude-agent-acp)"
 		}
 		add(Fail, "agent", "%s not found on PATH%s", a.Argv[0], hint)
 		return out
+	} else {
+		add(OK, "agent", "%s: %s", a.Name, strings.Join(a.Argv, " "))
 	}
-	add(OK, "agent", "%s: %s", a.Name, strings.Join(a.Argv, " "))
 	if a.Name == "claude" && os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
 		add(Warn, "agent", "neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set; Claude Code must find credentials in ~/.claude")
+	}
+	if a.Protocol == "pi-rpc" {
+		r := &agent.Runner{}
+		if probe {
+			dir, err := os.MkdirTemp("", "spine-probe-")
+			if err != nil {
+				add(Fail, "pi", "%v", err)
+				return out
+			}
+			defer os.RemoveAll(dir)
+			if msg, err := r.ProbePi(ctx, a, dir); err != nil {
+				add(Fail, "pi", "%v", err)
+			} else {
+				add(OK, "pi", "%s", msg)
+			}
+		} else if err := r.CheckPiVersion(ctx, a); err != nil {
+			add(Fail, "pi", "%v", err)
+		} else {
+			add(OK, "pi", "version %s (pinned)", a.Version)
+		}
+		if a.Container == nil {
+			add(Warn, "pi", "pi has no sandbox and never asks for approval: give this adapter a container:")
+		}
+		return out
 	}
 	if probe {
 		dir, err := os.MkdirTemp("", "spine-probe-")
@@ -86,4 +124,11 @@ func contains(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func orDefault(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
 }

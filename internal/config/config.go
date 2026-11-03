@@ -46,6 +46,14 @@ type Supervisor struct {
 }
 
 type rawAdapter struct {
+	Protocol     string            `yaml:"protocol"`
+	Version      string            `yaml:"version"`
+	Model        string            `yaml:"model"`
+	Provider     string            `yaml:"provider"`
+	Args         []string          `yaml:"args"`
+	ToolTimeout  string            `yaml:"tool_timeout"`
+	MaxTurns     int               `yaml:"max_turns"`
+	Container    *agent.Container  `yaml:"container"`
 	Argv         []string          `yaml:"argv"`
 	Env          map[string]string `yaml:"env"`
 	PassEnv      []string          `yaml:"pass_env"`
@@ -134,7 +142,12 @@ func Parse(b []byte) (Config, error) {
 		c.Agent = r.Agent
 	}
 	for name, ra := range r.Adapters {
-		a := agent.Adapter{Name: name, Argv: ra.Argv, Env: ra.Env, PassEnv: ra.PassEnv, Permissions: ra.Permissions}
+		a := agent.Adapter{Name: name, Argv: ra.Argv, Env: ra.Env, PassEnv: ra.PassEnv, Permissions: ra.Permissions,
+			Protocol: ra.Protocol, Version: ra.Version, Model: ra.Model, Provider: ra.Provider, Args: ra.Args,
+			MaxTurns: ra.MaxTurns, Container: ra.Container}
+		if a.Protocol == "pi-rpc" && len(a.Argv) == 0 {
+			a.Argv = []string{"pi"}
+		}
 		if base, ok := c.Adapters[name]; ok { // overlay on a built-in
 			if len(a.Argv) == 0 {
 				a.Argv = base.Argv
@@ -154,6 +167,21 @@ func Parse(b []byte) (Config, error) {
 		}
 		if d > 0 {
 			a.StallTimeout = d
+		}
+		if a.ToolTimeout, err = dur(ra.ToolTimeout, "adapters."+name+".tool_timeout"); err != nil {
+			return Config{}, err
+		}
+		switch a.Protocol {
+		case "", "acp":
+		case "pi-rpc":
+			if a.Version == "" {
+				return Config{}, fmt.Errorf("config: adapter %q: protocol pi-rpc requires a pinned version (e.g. version: 1.5.0)", name)
+			}
+		default:
+			return Config{}, fmt.Errorf("config: adapter %q: protocol must be acp or pi-rpc", name)
+		}
+		if a.Container != nil && a.Container.Image == "" {
+			return Config{}, fmt.Errorf("config: adapter %q: container.image is required", name)
 		}
 		if len(a.Argv) == 0 {
 			return Config{}, fmt.Errorf("config: adapter %q has no argv", name)

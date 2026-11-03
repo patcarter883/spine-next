@@ -96,7 +96,7 @@ func Open(ctx context.Context, repo string, o Options) (*App, error) {
 	a.Registry = builtin.New(tools.Options{Cache: tools.StoreCache{S: st}},
 		&build.Runner{ScratchDir: scratch, Artifacts: &artifacts.Store{Dir: filepath.Join(cd, "spine", "artifacts")}})
 	a.Gate = &gate.Engine{Reg: a.Registry, ScratchDir: scratch}
-	a.Runner = &agent.Runner{Procs: a.WT, Version: Version}
+	a.Runner = &agent.Runner{Procs: a.WT, Version: Version, WorktreeRoot: a.WT.Root()}
 	sup := o.Supervisor
 	if sup == nil && a.Config.Supervisor.Type == "llm" {
 		// Credentials come from the environment (ANTHROPIC_API_KEY, an

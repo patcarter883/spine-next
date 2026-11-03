@@ -122,6 +122,7 @@ func (c *Controller) Run(parent context.Context) (err error) {
 	if rep.ProcsReaped+len(rep.StrayProcsKilled)+rep.LeasesDiscarded+rep.LeasesTornDown+rep.MergesCompleted+rep.SnapshotsRecovered > 0 {
 		c.Logf("recovered: %+v", rep)
 	}
+	c.reapContainers(ctx)
 	if err := c.resumeOrphans(ctx); err != nil {
 		return err
 	}
@@ -189,6 +190,24 @@ func (c *Controller) Run(parent context.Context) (err error) {
 	c.mu.Unlock()
 	c.ops.Wait()
 	return failure
+}
+
+// reapContainers removes agent containers a previous controller left
+// behind (a killed container CLI does not stop its container).
+func (c *Controller) reapContainers(ctx context.Context) {
+	seen := map[string]bool{}
+	for _, a := range c.Config.Adapters {
+		if a.Container == nil || seen[a.Container.Runtime] {
+			continue
+		}
+		seen[a.Container.Runtime] = true
+		n, err := agent.ReapContainers(ctx, a.Container.Runtime, c.WT.Root())
+		if err != nil {
+			c.Logf("reaping agent containers: %v", err)
+		} else if n > 0 {
+			c.Logf("removed %d agent container(s) left by a previous controller", n)
+		}
+	}
 }
 
 // ErrPanic marks an error produced by a recovered panic.

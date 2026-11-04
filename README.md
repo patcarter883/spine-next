@@ -92,6 +92,8 @@ Point Pi at the model server in `~/.pi/agent/models.json` (or the directory in `
   "models": [{"id": "qwen3-coder-30b", "contextWindow": 65536, "maxTokens": 8192}]}}}
 ```
 
+The image has no language toolchains, so an agent can't run a project's builds or tests itself, and may go looking for them. For Go repositories, `contrib/pi/Dockerfile.go` adds Go and gcc on top of it.
+
 Then run `spine doctor --agent`. It checks the pinned version and that Pi starts in RPC mode and resolves the model, without sending a prompt.
 
 Pi has no sandbox, never asks for approval, has no default timeout for shell commands and no turn limit, and a failed run can still exit 0. Spine adds each guardrail from outside the process:

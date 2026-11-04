@@ -6,3 +6,14 @@ adapters:
     container:
       image: spine-pi:1.5.0
       runtime: docker
+agent: claude
+parallel: 4
+base: main
+budget:
+  max_attempts: 2
+  max_patch_rounds: 3
+  max_tokens: 0
+  max_wall_clock: 4h0m0s
+  per_run_timeout: 45m0s
+supervisor:
+  type: llm

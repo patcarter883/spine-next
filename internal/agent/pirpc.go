@@ -278,20 +278,11 @@ func (r *Runner) runPi(ctx context.Context, req RunRequest) (api.Outcome, error)
 	env := buildEnv(a)
 	var wr *wrapped
 	if a.Container != nil {
-		var mounts, extra []string
-		if dir := piAgentDir(a); dir != "" {
-			// A private, writable copy of the model configuration only: Pi
-			// writes to its agent dir, and the host's auth.json, sessions
-			// and extensions must not enter the container.
-			priv, err := privatePiAgentDir(dir)
-			if err != nil {
-				return out, err
-			}
-			defer os.RemoveAll(priv)
-			mounts = append(mounts, priv+":/spine/pi-agent")
-			extra = append(extra, PiAgentDirEnv+"=/spine/pi-agent")
+		mounts, extra, removeAgentDir, err := piContainerAgentDir(a)
+		if err != nil {
+			return out, err
 		}
-		var err error
+		defer removeAgentDir()
 		wr, err = a.Container.wrap(RootLabel(r.WorktreeRoot), req.Lease.Path, req.Lease.TaskID, req.Prompt.Attempt, req.Prompt.Round, argv, env, mounts, extra)
 		if err != nil {
 			return out, err
@@ -422,6 +413,24 @@ func PiAgentDir(a Adapter) string {
 		return ""
 	}
 	return home + "/.pi/agent"
+}
+
+// piContainerAgentDir prepares the agent dir a containerized Pi sees: a
+// private, writable copy of the model configuration only. Pi writes to its
+// agent dir, and the host's auth.json, sessions and extensions must not enter
+// the container. It returns the mounts and environment to run with, and a
+// function that removes the copy once the container is gone.
+func piContainerAgentDir(a Adapter) (mounts, extraEnv []string, remove func(), err error) {
+	dir := piAgentDir(a)
+	if dir == "" {
+		return nil, nil, func() {}, nil
+	}
+	priv, err := privatePiAgentDir(dir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return []string{priv + ":/spine/pi-agent"}, []string{PiAgentDirEnv + "=/spine/pi-agent"},
+		func() { os.RemoveAll(priv) }, nil
 }
 
 // PiAgentFiles are copied from the host's Pi agent dir into a container
@@ -634,15 +643,34 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 }
 
 // ProbePi checks a pi-rpc adapter without spending tokens: the pinned
-// version (inside the container when configured) and, for an uncontained
-// adapter, that Pi starts in RPC mode in dir and resolves the configured
-// model (get_state).
+// version, then that Pi starts in RPC mode and resolves the configured model
+// (get_state), so a model missing from models.json shows up here and not when
+// a task runs. It never sends a prompt. A contained adapter's Pi runs in the
+// container with the same private agent dir as a real run; dir, which need not
+// be a git worktree, is mounted as its working directory in place of a
+// worktree and its git dirs.
 func (r *Runner) ProbePi(ctx context.Context, a Adapter, dir string) (string, error) {
 	if err := r.checkPiVersion(ctx, a); err != nil {
 		return "", err
 	}
+	argv := append(append([]string{}, a.Argv...), piArgs(a)...)
+	env := buildEnv(a)
+	where := ""
+	// Deferred teardown runs in reverse: stdin closed and the process waited
+	// for, then the container and env file, then the private agent dir.
 	if a.Container != nil {
-		return "pi " + a.Version + " in " + a.Container.Image, nil
+		mounts, extra, removeAgentDir, err := piContainerAgentDir(a)
+		if err != nil {
+			return "", err
+		}
+		defer removeAgentDir()
+		wr, err := a.Container.wrapProbe(RootLabel(r.WorktreeRoot), dir, argv, env, mounts, extra)
+		if err != nil {
+			return "", err
+		}
+		defer a.Container.cleanup(wr)
+		argv, env = wr.argv, wr.env
+		where = " in " + a.Container.Image
 	}
 	inR, inW, err := os.Pipe()
 	if err != nil {
@@ -654,16 +682,18 @@ func (r *Runner) ProbePi(ctx context.Context, a Adapter, dir string) (string, er
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		exec.Run(pctx, exec.Cmd{Argv: append(append([]string{}, a.Argv...), piArgs(a)...), Dir: dir, Env: buildEnv(a),
+		exec.Run(pctx, exec.Cmd{Argv: argv, Dir: dir, Env: env,
 			StdinFile: inR, Stdout: outW, Stderr: &stderr, Grace: 2 * time.Second})
 		outW.Close()
 		close(done)
 	}()
 	conn := newPiConn(inW)
 	go conn.serve(outR)
-	defer func() { inW.Close(); <-done }()
+	stop := sync.OnceFunc(func() { inW.Close(); <-done })
+	defer stop()
 	resp, err := conn.call(pctx, "get_state", nil)
 	if err != nil {
+		stop() // the write can fail on a dead Pi before its stderr has drained
 		return "", fmt.Errorf("pi rpc: %w (stderr: %s)", err, trunc(strings.TrimSpace(stderr.String()), 400))
 	}
 	var st struct {
@@ -676,5 +706,5 @@ func (r *Runner) ProbePi(ctx context.Context, a Adapter, dir string) (string, er
 	if st.Model == nil {
 		return "", fmt.Errorf("pi started but has no model selected (set model: in the adapter, and models.json for a local server)")
 	}
-	return fmt.Sprintf("pi %s, model %s/%s", a.Version, st.Model.Provider, st.Model.ID), nil
+	return fmt.Sprintf("pi %s, model %s/%s%s", a.Version, st.Model.Provider, st.Model.ID, where), nil
 }

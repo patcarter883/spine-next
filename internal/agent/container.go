@@ -76,9 +76,30 @@ func (c *Container) wrap(rootLabel, worktree, task string, attempt, round int, a
 	if err != nil {
 		return nil, err
 	}
+	name := reNameUnsafe.ReplaceAllString(fmt.Sprintf("spine-%s-a%d-r%d-%s", task, attempt, round, randomSuffix()), "-")
+	volumes := []string{commondir + ":" + commondir + ":ro", gitdir + ":" + gitdir, worktree + ":" + worktree}
+	return c.runCommand(name, rootLabel, worktree, volumes, argv, env, extraMounts, extraEnv)
+}
+
+// wrapProbe is wrap for a probe, which has no worktree: dir (any directory)
+// is the only directory mounted besides extraMounts and c.Mounts, and it is
+// the working directory. No git dir and no repository enter the container.
+func (c *Container) wrapProbe(rootLabel, dir string, argv, env []string, extraMounts, extraEnv []string) (*wrapped, error) {
+	if c.Image == "" {
+		return nil, fmt.Errorf("agent: container.image is required")
+	}
+	return c.runCommand("spine-probe-"+randomSuffix(), rootLabel, dir, []string{dir + ":" + dir}, argv, env, extraMounts, extraEnv)
+}
+
+func randomSuffix() string {
 	var rnd [3]byte
 	rand.Read(rnd[:])
-	name := reNameUnsafe.ReplaceAllString(fmt.Sprintf("spine-%s-a%d-r%d-%s", task, attempt, round, hex.EncodeToString(rnd[:])), "-")
+	return hex.EncodeToString(rnd[:])
+}
+
+// runCommand builds the `<runtime> run` command and writes its env file.
+// volumes come first, then extraMounts, then the configured mounts.
+func (c *Container) runCommand(name, rootLabel, workdir string, volumes, argv, env, extraMounts, extraEnv []string) (*wrapped, error) {
 	f, err := os.CreateTemp("", "spine-agent-env-*")
 	if err != nil {
 		return nil, err
@@ -100,13 +121,10 @@ func (c *Container) wrap(rootLabel, worktree, task string, attempt, round int, a
 	}
 	a := []string{c.runtime(), "run", "--rm", "-i", "--init", "--name", name,
 		"--label", ContainerLabel + "=" + rootLabel,
-		"--network", network, "--user", user, "--workdir", worktree,
+		"--network", network, "--user", user, "--workdir", workdir,
 		"--env-file", f.Name(), "--env", "HOME=/tmp/spine-home",
-		"--volume", commondir + ":" + commondir + ":ro",
-		"--volume", gitdir + ":" + gitdir,
-		"--volume", worktree + ":" + worktree,
 	}
-	for _, m := range append(append([]string{}, extraMounts...), c.Mounts...) {
+	for _, m := range append(append(append([]string{}, volumes...), extraMounts...), c.Mounts...) {
 		a = append(a, "--volume", m)
 	}
 	a = append(a, c.Args...)

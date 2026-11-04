@@ -1,7 +1,12 @@
 // Command fakepi is a scripted stand-in for the Pi coding agent's RPC mode
 // (`pi --mode rpc`), for tests. It answers --version, records its argv, and
 // plays a plan: FAKE_PI_PLAN is {"<task or *>": Step}. A continuation
-// prompt (a second prompt in one process) plays Step.Then.
+// prompt (a second prompt in one process) plays Step.Then. Every command type
+// received is logged to `commands`. get_state reports the model from --provider
+// and --model (a provider/id --model is split on the first slash), or null
+// without one. When FAKE_PI_CHECK_MODELS is set, a model not listed in
+// $PI_CODING_AGENT_DIR/models.json makes it print `Model <provider>/<id> not
+// found` to stderr and exit 1 at startup.
 package main
 
 import (
@@ -168,6 +173,41 @@ func run(s Step) {
 	finish(stop, "Done.", s.ErrorMessage)
 }
 
+// modelArgs reads the configured model from the command line.
+func modelArgs(args []string) (provider, id string) {
+	for i := 0; i+1 < len(args); i++ {
+		switch args[i] {
+		case "--provider":
+			provider = args[i+1]
+		case "--model":
+			id = args[i+1]
+		}
+	}
+	if p, rest, ok := strings.Cut(id, "/"); ok {
+		provider, id = p, rest
+	}
+	return provider, id
+}
+
+// modelListed reports whether models.json in the agent dir lists the model.
+func modelListed(provider, id string) bool {
+	var cfg struct {
+		Providers map[string]struct {
+			Models []struct {
+				ID string `json:"id"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	b, _ := os.ReadFile(filepath.Join(os.Getenv("PI_CODING_AGENT_DIR"), "models.json"))
+	json.Unmarshal(b, &cfg)
+	for _, m := range cfg.Providers[provider].Models {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	for _, a := range os.Args[1:] {
 		if a == "--version" {
@@ -180,6 +220,11 @@ func main() {
 		}
 	}
 	logf("argv", strings.Join(os.Args[1:], " "))
+	provider, modelID := modelArgs(os.Args[1:])
+	if os.Getenv("FAKE_PI_CHECK_MODELS") != "" && modelID != "" && !modelListed(provider, modelID) {
+		fmt.Fprintf(os.Stderr, "Model %s/%s not found\n", provider, modelID)
+		os.Exit(1)
+	}
 	var cur Step
 	prompts := 0
 	sc := bufio.NewScanner(os.Stdin)
@@ -194,7 +239,14 @@ func main() {
 			emit(map[string]any{"type": "response", "command": "parse", "success": false, "error": "bad json"})
 			continue
 		}
+		logf("commands", c.Type)
 		switch c.Type {
+		case "get_state":
+			var model any
+			if modelID != "" {
+				model = map[string]any{"provider": provider, "id": modelID}
+			}
+			respond(c.ID, "get_state", map[string]any{"model": model})
 		case "prompt":
 			prompts++
 			logf("prompts", fmt.Sprintf("=== prompt %d\n%s", prompts, c.Message))

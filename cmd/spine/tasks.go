@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -18,7 +17,6 @@ import (
 	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
-	"github.com/patcarter883/spine-next/internal/ui"
 	"github.com/patcarter883/spine-next/internal/worktree"
 )
 
@@ -495,21 +493,11 @@ func runUI(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	st, err := openRead(ctx, *repo)
+	src, closeSrc, err := newRepoSource(ctx, *repo)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	db, cd, _ := app.DBPath(*repo)
-	primary, _ := worktree.PrimaryOf(ctx, *repo)
-	name := filepath.Base(primary)
-	src := ui.SourceFunc(func(context.Context) []ui.Repo {
-		state := "stopped"
-		if storage.IsLocked(db) {
-			state = "running"
-		}
-		return []ui.Repo{{Name: name, Path: primary, State: state, Store: st, InboxDir: inbox.Dir(cd), CommonDir: cd}}
-	})
+	defer closeSrc()
 	s, err := newDashboard(src, false, nil, *addr, d)
 	if err != nil {
 		return err

@@ -305,7 +305,14 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 		prompt.Plan, prompt.Scope, prompt.Agents, prompt.Gates = true, nil, c.Config.AdapterNames(), acceptance
 		prompt.Acceptance = nil
 	}
-	c.event(t.ID, "agent_start", map[string]any{"attempt": attempt, "round": round, "adapter": a.Name, "feedback": fb})
+	if t.Spec.Kind == api.KindSurvey && round == 0 {
+		if err := c.prepareSurvey(ctx, t, lease.Path, lease.BaseOID); err != nil {
+			return c.escalate(ctx, t, "SurveyFailed", "deriving the module map: "+trunc(err.Error(), 500))
+		}
+	}
+	ctxInfo := c.addContext(ctx, t, a, lease.BaseOID, &prompt)
+	c.event(t.ID, "agent_start", map[string]any{"attempt": attempt, "round": round, "adapter": a.Name, "feedback": fb,
+		"protocol": a.Protocol, "context": ctxInfo})
 	id := t.ID
 	c.start(id, "agent", func(opCtx context.Context) {
 		lastEvent := time.Time{}

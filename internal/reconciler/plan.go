@@ -13,6 +13,7 @@ import (
 
 	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/modmap"
 	"github.com/patcarter883/spine-next/internal/plan"
 )
 
@@ -41,9 +42,14 @@ func (c *Controller) collectPlan(ctx context.Context, t *api.Task, b api.Budget)
 	}
 	var issues []plan.Issue
 	if len(problems) == 0 {
+		var mods *modmap.Map
+		if m, ok, err := modmap.Load(ctx, c.WT.Primary(), lease.BaseOID); ok && err == nil {
+			mods = m
+		}
 		issues = plan.Validate(p, plan.Env{
-			Repo:   c.Repo,
-			Agents: c.Config.AdapterNames(),
+			Repo:    c.Repo,
+			Modules: mods,
+			Agents:  c.Config.AdapterNames(),
 			TaskPhase: func(id string) (api.Phase, bool) {
 				x, err := c.Store.GetTask(ctx, api.TaskID(id))
 				return x.Status.Phase, err == nil

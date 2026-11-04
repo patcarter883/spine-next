@@ -164,6 +164,10 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/repos/{repo}/plans/validate", s.validatePlan)
 	m.HandleFunc("POST /api/repos/{repo}/plans/submit", s.need(auth.Operator, s.submitPlan))
 	m.HandleFunc("GET /api/graph", s.graph)
+	m.HandleFunc("POST /api/repos/{repo}/gates/check", s.need(auth.Operator, s.gatesCheck))
+	m.HandleFunc("GET /api/repos/{repo}/context", s.contextInfo)
+	m.HandleFunc("POST /api/repos/{repo}/survey", s.need(auth.Operator, s.startSurvey))
+	m.HandleFunc("GET /api/repos/{repo}/suggest", s.suggestScope)
 
 	// Monitoring.
 	m.HandleFunc("GET /api/stats", s.stats)

@@ -18,6 +18,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/gate"
 	"github.com/patcarter883/spine-next/internal/gitro"
 	"github.com/patcarter883/spine-next/internal/inbox"
+	"github.com/patcarter883/spine-next/internal/modmap"
 	"github.com/patcarter883/spine-next/internal/plan"
 	"github.com/patcarter883/spine-next/internal/supervisor"
 	"github.com/patcarter883/spine-next/internal/worktree"
@@ -160,6 +161,9 @@ func runPlan(ctx context.Context, args []string) error {
 		}()
 		if gerr == nil {
 			env.Gates = gc.Order
+		}
+		if m, ok, err := modmap.Load(ctx, primary, cfg.Base); ok && err == nil {
+			env.Modules = m
 		}
 		if out, err := (gitro.Repo{Dir: primary}).Run(ctx, "ls-tree", "-r", "-z", "--name-only", cfg.Base); err == nil {
 			for _, f := range strings.Split(string(out), "\x00") {

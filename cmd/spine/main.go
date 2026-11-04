@@ -71,6 +71,12 @@ func main() {
 		err = runPause(ctx, false, args)
 	case "plan":
 		err = runPlan(ctx, args)
+	case "gates":
+		err = runGates(ctx, args)
+	case "modules":
+		err = runModules(ctx, args)
+	case "survey":
+		err = runSurvey(ctx, args)
 	case "users":
 		err = runUsers(ctx, args)
 	case "doctor":
@@ -103,6 +109,9 @@ commands:
               (runs a controller inline until the task finishes if none is running)
   ui          web dashboard on http://127.0.0.1:8765 [--read-only] [--addr A --tls-cert C --tls-key K]
   users       add NAME [--role viewer|operator|admin] | list | remove NAME: dashboard sign-in
+  gates       check [REV] [--file F]: dry-run the gates on main (or REV) with no agent
+  survey      refresh the repository context (.spine/modules.yaml, .spine/context.md) through a task
+  modules     print the derived module map [--write] [--render N]
   plan        "goal": a planner agent proposes tasks to review | validate FILE | submit FILE
   repos       add [PATH] [--name N] | list | remove NAME: repositories the supervisor runs
   supervisor  run | status | install: one process for every registered repository,
@@ -141,7 +150,8 @@ func runDoctor(ctx context.Context, args []string) error {
 		return err
 	}
 	failed := false
-	for _, f := range append(doctor.Run(ctx, *repo), doctor.Agent(ctx, *repo, *probe)...) {
+	fs2 := append(doctor.Run(ctx, *repo), doctor.Agent(ctx, *repo, *probe)...)
+	for _, f := range append(fs2, doctor.Context(ctx, *repo)...) {
 		fmt.Printf("%-4s  %-10s  %s\n", f.Level, f.Check, f.Message)
 		failed = failed || f.Level == doctor.Fail
 	}

@@ -211,7 +211,7 @@ function renderRows() {
   $("#tasks").innerHTML = rows.length ? rows.map(t => {
     const k = taskKey(t), web = ov.repos.find(r => r.name === t.repo)?.web_url;
     return `<div class="task ${k === sel ? "sel" : ""}" data-k="${esc(k)}">${can("operator") ? `<input type="checkbox" class="pick" data-k="${esc(k)}" ${picked.has(k) ? "checked" : ""} aria-label="select">` : "<span></span>"}
-    <div><div class="t">${t.kind === "plan" ? `<span class="kindtag">plan</span> ` : ""}${esc(t.title)}</div>
+    <div><div class="t">${t.kind ? `<span class="kindtag">${esc(t.kind)}</span> ` : ""}${esc(t.title)}</div>
     <div class="m">${showRepo ? `<span class="repo">${esc(t.repo)}</span>` : ""}<span class="badge b-${esc(t.phase)}">${esc(t.phase)}</span><span>${esc(t.reason)}</span>
     <span>a${t.attempt} r${t.round}</span>${t.tokens ? `<span>${fmtN(t.tokens)} tok</span>` : ""}<span>${ago(t.created)}</span>${t.by ? `<span>${esc(t.by)}</span>` : ""}
     ${t.commit ? (web ? `<a href="${esc(web)}/commit/${esc(t.commit)}" target="_blank" rel="noopener" class="mono">${esc(t.commit.slice(0, 8))}</a>` : `<span class="mono">${esc(t.commit.slice(0, 8))}</span>`) : ""}</div></div></div>`
@@ -266,7 +266,7 @@ async function loadDetail(soft) {
     if (s.phase === "Pending" || STOPPED.includes(s.phase)) acts.push(`<button class="btn" data-a="edit">${s.phase === "Pending" ? "Edit" : "Edit & retry"}</button>`);
     if (!DONE.includes(s.phase)) acts.push(`<button class="btn danger" data-a="cancel">Cancel</button>`);
   }
-  d.innerHTML = `<h2>${sp.kind === "plan" ? `<span class="kindtag">plan</span> ` : ""}${esc(sp.title || sp.intent.split("\n")[0])}</h2>
+  d.innerHTML = `<h2>${sp.kind ? `<span class="kindtag">${esc(sp.kind)}</span> ` : ""}${esc(sp.title || sp.intent.split("\n")[0])}</h2>
    <span class="badge b-${esc(s.phase)}">${esc(s.phase)}</span> <span class="mono">${esc(s.reason || "")}</span> ${s.message ? `<span class="muted">— ${esc(s.message)}</span>` : ""}
    <div class="actions">${acts.join("")}</div>
    <div class="tabs">${tabs.map(([k, l]) => `<a href="#/tasks/${enc(r)}/${enc(id)}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</div><div id="tab"></div>`;
@@ -517,7 +517,7 @@ async function taskForm(el, opts) {
    ${!t ? `<label>Template <span class="hint">(a saved task shape; fills the form)</span><select name="template"><option value="">none</option></select></label>` : ""}
    <label>What should the agent do?<textarea name="intent" required placeholder="Add input validation to the signup handler and cover it with tests.">${esc(sp.intent || "")}</textarea></label>
    <label>Title <span class="hint">(commit subject; default: first line of the intent)</span><input name="title" value="${esc(sp.title || "")}"></label>
-   <div class="row"><label>Scope <span class="hint">(path globs, one per line; empty = whole repo)</span><textarea name="scope" style="min-height:64px" placeholder="src/**">${esc((sp.scope || []).join("\n"))}</textarea></label>
+   <div class="row"><label>Scope <span class="hint">(path globs, one per line; empty = whole repo)</span><textarea name="scope" style="min-height:64px" placeholder="src/**">${esc((sp.scope || []).join("\n"))}</textarea><span id="sugg"></span></label>
    <label>After <span class="hint">(task ids that must integrate first; repo:task for another repository)</span><textarea name="after" style="min-height:64px">${esc((sp.depends_on || []).join("\n"))}</textarea></label></div>
    <div class="row"><label>Base branch<input name="base" value="${esc((sp.base_ref || "").replace("refs/heads/", ""))}"></label><label>Agent<select name="agent"></select><span class="hint" id="agentHint"></span></label></div>
    <div class="row3"><label>Max attempts<input name="max_attempts" type="number" min="1" value="${sp.budget?.max_attempts || ""}"></label><label>Max repair rounds<input name="max_rounds" type="number" min="0" value="${sp.budget?.max_patch_rounds || ""}"></label>
@@ -557,6 +557,9 @@ async function taskForm(el, opts) {
     $$("#gchecks input", el).forEach(c => c.checked = !(x.gates || []).length || x.gates.includes(c.value));
     const m = f.intent.value.match(/\{\{[^}]+\}\}/); if (m) { f.intent.focus(); f.intent.setSelectionRange(m.index, m.index + m[0].length) }
   };
+  const addScope = globs => { const cur = lines(f.scope.value); for (const g of globs) if (!cur.includes(g)) cur.push(g); f.scope.value = cur.join("\n") };
+  f.intent.addEventListener("input", () => suggestInto($("#sugg", el), f.repo.value, f.intent.value, addScope));
+  if (sp.intent) suggestInto($("#sugg", el), f.repo.value, sp.intent, addScope);
   await fill(); f.intent.focus();
   const num = v => v === "" ? 0 : Number(v);
   const body = () => {
@@ -646,7 +649,7 @@ function planEditor(el, readonly) {
      <div class="row2"><label>Scope (one glob per line)<textarea data-k="scope" ${ro} style="min-height:50px">${esc((t.scope || []).join("\n"))}</textarea></label>
      <label>After (ids)<textarea data-k="after" ${ro} style="min-height:50px">${esc((t.after || []).join("\n"))}</textarea></label>
      <label>Agent / gates<input data-k="agent" value="${esc(t.agent || "")}" placeholder="default agent" ${ro}><input data-k="gates" value="${esc((t.gates || []).join(", "))}" placeholder="all gates" ${ro}></label></div>
-     <div class="issues"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
+     ${readonly ? "" : `<div class="sugg" data-sg-i="${i}"></div>`}<div class="issues"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
    ${readonly ? `<p class="hint">${!can("operator") ? "Read-only." : "This plan was already handled."}</p>` : `<div class="actions"><button class="btn" id="padd">+ Add task</button><button class="btn" id="pexport">Export JSON</button>
      <label class="check hint"><input type="checkbox" id="pappr"> hold every task for my approval</label><button class="btn primary" id="psubmit">Submit ${p.tasks.length} task(s)</button>
      ${p.plan_task ? `<button class="btn" id="preplan">Ask the planner again…</button>` : ""}</div>`}`;
@@ -669,6 +672,12 @@ function planEditor(el, readonly) {
   };
   const issue = x => `<div class="${x.level === "error" ? "fail" : "warn"}">${x.level === "error" ? "✗" : "!"} ${x.field ? `<b>${esc(x.field)}</b>: ` : ""}${esc(x.message)}</div>`;
   $$("input,textarea", $("#ptasks", el)).forEach(i => i.oninput = () => { clearTimeout(valTimer); valTimer = setTimeout(validate, 500) });
+  if (!readonly) $$(".ptask", el).forEach(div => {
+    const i = +div.dataset.i, ta = $("[data-k=intent]", div), sc = $("[data-k=scope]", div), box = $("[data-sg-i]", div);
+    const pick = globs => { const cur = lines(sc.value); for (const g of globs) if (!cur.includes(g)) cur.push(g); sc.value = cur.join("\n"); clearTimeout(valTimer); valTimer = setTimeout(validate, 300) };
+    ta.addEventListener("input", () => suggestInto(box, p.repo, ta.value, pick));
+    if (!(p.tasks[i].scope || []).length && p.tasks[i].intent) suggestInto(box, p.repo, p.tasks[i].intent, pick);
+  });
   $$("[data-del]", el).forEach(b => b.onclick = () => { sync(); p.tasks.splice(+b.dataset.del, 1); planEditor(el) });
   const add = $("#padd", el); if (add) add.onclick = () => { sync(); p.tasks.push(blankTask()); planEditor(el) };
   const ex = $("#pexport", el); if (ex) ex.onclick = () => { sync(); dialog(`<h2>Plan JSON</h2><pre class="log">${esc(JSON.stringify({ notes: p.notes, tasks: p.tasks.map(clean) }, null, 2))}</pre><p class="hint">Submit it from the CLI with <code>spine plan submit FILE</code>.</p>`) };
@@ -816,6 +825,11 @@ async function viewQuality() {
     ${tile(q.avg_attempts.toFixed(1), "attempts per finished task")}${tile(q.finished, "finished tasks")}</div>
    <div class="grid2"><section class="card"><h3>Why tasks escalated</h3>${hbars(q.escalations)}</section><section class="card"><h3>Top failing gates</h3>${hbars(q.failing_gates)}</section>
    <section class="card"><h3>Why tasks failed</h3>${hbars(q.fail_reasons)}</section><section class="card"><h3>How agent runs ended</h3>${hbars(q.outcome_reasons)}</section></div>
+   <section class="card"><h3>Repository context: with vs without</h3><p class="hint">Tasks whose agents got the repository context (context.md, and the module map for planners) against tasks that did not — including ${q.context_control_tasks || 0} task(s) in the experiment's control arm (<code>context.experiment</code> in .spine/config.yaml). Make context a default only once these favour it with enough tasks on both sides.</p>
+    <table><tr><th>Metric</th><th class="num">With context</th><th class="num">Without</th><th></th></tr>${(q.context || []).map(r => {
+      const pct = /rate|hitting/.test(r.metric), f = v => pct ? Math.round(100 * v) + "%" : v.toFixed(2);
+      const better = r.with_n && r.without_n ? ((r.lower_is_better ? r.with < r.without : r.with > r.without) ? '<span class="pass">context better</span>' : r.with === r.without ? '<span class="muted">same</span>' : '<span class="warn">context worse</span>') : '<span class="muted">not enough data</span>';
+      return `<tr><td>${esc(r.metric)}</td><td class="num">${r.with_n ? f(r.with) : "—"} <span class="muted">(n=${r.with_n})</span></td><td class="num">${r.without_n ? f(r.without) : "—"} <span class="muted">(n=${r.without_n})</span></td><td>${better}</td></tr>` }).join("")}</table></section>
    <section class="card"><h3>Supervisor decisions: LLM vs rules</h3><p class="hint">Each failed round goes to a supervisor (rules, or the LLM with a rules fallback). “Improved” counts decisions whose next gated round failed fewer checks — the M3 comparison.</p>
    ${q.supervisors.length ? `<table><tr><th>Supervisor</th><th class="num">Decisions</th><th>Actions</th><th class="num">Fallbacks</th><th class="num">Improved next round</th><th class="num">Tasks</th><th class="num">…integrated</th></tr>
     ${q.supervisors.map(x => `<tr><td class="mono">${esc(x.supervisor)}</td><td class="num">${x.decisions}</td><td>${Object.entries(x.actions).map(([k, v]) => `${esc(k)} ${v}`).join(", ")}</td><td class="num">${x.fallbacks}</td>
@@ -849,7 +863,8 @@ async function viewSlots() {
 // ===== Health =====
 async function viewHealth(probe) {
   const rn = curRepo();
-  $("#view").innerHTML = `<div class="page narrow"><h2>Health — ${esc(rn)}</h2><p class="hint">Runs <code>spine doctor</code>${probe ? " with the agent handshake" : ""}, and checks disk, database size and stuck work.${ov.multi ? " Pick another repository in the header." : ""}</p><div id="hb" class="muted">Running checks…</div></div>`;
+  $("#view").innerHTML = `<div class="page narrow"><h2>Health — ${esc(rn)}</h2><p class="hint">Runs <code>spine doctor</code>${probe ? " with the agent handshake" : ""}, and checks disk, database size and stuck work.${ov.multi ? " Pick another repository in the header." : ""}</p><div id="onb"></div><div id="hb" class="muted">Running checks…</div></div>`;
+  onboarding(rn);
   const h = await get(`/api/repos/${enc(rn)}/health${probe ? "?probe=1" : ""}`).catch(e => ({ error: e.message }));
   if (route.view !== "health") return;
   if (h.error) { $("#hb").innerHTML = `<p class="fail">${esc(h.error)}</p>`; return }
@@ -869,6 +884,60 @@ async function viewHealth(probe) {
   $("#probe").onclick = () => viewHealth(true); $("#rerun").onclick = () => viewHealth(probe);
   const gp = $("#gcplan"); if (gp) gp.onclick = async () => { const r = await get(`/api/repos/${enc(rn)}/gc?days=${$("#gcd").value}`); toast(`${r.snapshot_refs.length} refs, ${r.stray_worktrees.length} worktrees, ${fmtBytes(r.old_cache_bytes)} cache would be removed`) };
   const gr = $("#gcrun"); if (gr) gr.onclick = async () => { if (!confirm("Remove old snapshot refs, stray worktrees and old cache entries?")) return; try { const j = await send("POST", `/api/repos/${enc(rn)}/gc`, { days: +$("#gcd").value }); toast(j.controller ? "Cleanup queued for the controller" : "Queued; it runs when the controller starts", "ok") } catch (x) { toast(esc(x.message), "bad") } };
+}
+
+// - Onboarding and repository context -
+async function onboarding(rn) {
+  const c = await get(`/api/repos/${enc(rn)}/context`).catch(e => ({ error: e.message }));
+  if (route.view !== "health" || !$("#onb")) return;
+  if (c.error) { $("#onb").innerHTML = `<p class="fail">${esc(c.error)}</p>`; return }
+  const m = c.modules, stale = c.stale_commits, isStale = m && stale > c.stale_after;
+  const step = (ok, warn) => ok ? `<span class="pass">✓</span>` : warn ? `<span class="warn">!</span>` : `<span class="muted">○</span>`;
+  const surv = c.surveys.slice().sort((a, b) => b.created.localeCompare(a.created))[0];
+  $("#onb").innerHTML = `<section class="card"><h3>Onboarding and repository context</h3>
+   <p>${step(c.gates_file)} <b>Stage 1 — gates.</b> ${c.gates_file ? `<code>.spine/gates.yaml</code> is on ${esc(c.base)}.` : `No <code>.spine/gates.yaml</code> on ${esc(c.base)} yet (<code>spine init</code> writes one).`}
+    Dry-run the gates on ${esc(c.base)} with no agent to see which a task can pass.</p>
+   <div class="actions">${can("operator") ? `<input id="gcrev" placeholder="${esc(c.base)}" style="width:160px"><button class="btn" id="gcheck">Check gates</button>` : ""}</div><div id="gcout"></div>
+   <p style="margin-top:14px">${step(m && c.notes && !isStale, isStale || (!!m !== !!c.notes))} <b>Stage 2 — repository context.</b>
+    ${m ? `Module map: ${m.modules.length} modules, ${(m.co_change || []).length} co-change pairs, derived at <span class="mono">${esc(m.generated.commit.slice(0, 10))}</span>, <span class="${isStale ? "warn" : ""}">${stale >= 0 ? stale + " commits behind " + esc(c.base) : "age unknown"}</span>${isStale ? ` (stale after ${c.stale_after})` : ""}.` : "No <code>.spine/modules.yaml</code>."}
+    ${c.notes ? `<code>.spine/context.md</code>: about ${c.notes_tokens} tokens (cap ${c.notes_cap})${c.truncated ? ' <span class="warn">— over the cap, agents get the first part</span>' : ""}.` : "No <code>.spine/context.md</code>."}
+    ${c.modules_error ? `<span class="fail">${esc(c.modules_error)}</span>` : ""}</p>
+   <p class="hint">A survey task derives the module map from the code and history, has an agent label it and write the summary, checks both with the <code>spine.context</code> gate and waits for your approval.
+    Agents with context on get the summary: ${c.adapters.map(a => `${esc(a.name)} <b>${a.context ? "on" : "off"}</b>`).join(", ")}; planners also get the module map.${c.experiment ? ` Experiment: ${Math.round(c.experiment * 100)}% of tasks run without context (see Quality).` : ""}</p>
+   <div class="actions">${can("operator") ? `<input id="sfocus" placeholder="focus (optional)" style="width:260px"><button class="btn primary" id="survey">${m || c.notes ? "Refresh context" : "Run survey"}</button>` : ""}
+    ${surv ? `<span class="hint">last survey: <a href="#/tasks/${enc(rn)}/${enc(surv.id)}">${esc(surv.id)}</a> <span class="badge b-${esc(surv.phase)}">${esc(surv.phase)}</span></span>` : ""}</div>
+   ${c.notes ? `<details><summary class="hint">context.md</summary><pre class="log" style="white-space:pre-wrap">${esc(c.notes)}</pre></details>` : ""}
+   ${m ? `<details><summary class="hint">Modules</summary><table><tr><th>Module</th><th>Language</th><th class="num">Files</th><th class="num">Tests</th><th class="num">Imported by</th><th>Label</th></tr>${m.modules.map(x => `<tr><td class="mono">${esc(x.name)}</td><td>${esc(x.language)}</td><td class="num">${x.files}</td><td class="num">${x.test_files}</td><td class="num">${x.imported_by}</td><td>${esc(x.label || "")}${(x.caveats || []).map(cv => `<div class="warn">${esc(cv)}</div>`).join("")}</td></tr>`).join("")}</table>
+     ${(m.co_change || []).length ? `<h3 class="sec">Change together</h3><table>${m.co_change.slice(0, 20).map(p => `<tr><td class="mono">${esc(p.a)}</td><td class="mono">${esc(p.b)}</td><td class="num">${p.commits} commits</td><td class="num">${Math.round(p.strength * 100)}%</td></tr>`).join("")}</table>` : ""}</details>` : ""}</section>`;
+  const gb = $("#gcheck");
+  if (gb) gb.onclick = async () => {
+    gb.disabled = true; $("#gcout").innerHTML = `<p class="muted">Running the gates (builds and tests may take a while)…</p>`;
+    try {
+      const r = await send("POST", `/api/repos/${enc(rn)}/gates/check`, { rev: $("#gcrev").value });
+      const cls = { ok: "pass", excused: "warn", "per-task": "muted", fail: "fail" };
+      $("#gcout").innerHTML = `<p>${r.ok ? '<span class="pass">✓ every gate can be passed</span>' : '<span class="fail">✗ some gates fail on this revision: no task could pass them</span>'} <span class="hint">${esc(r.source)} on ${esc(r.rev)} (${esc(r.commit.slice(0, 10))}), ${fmtMin(r.duration_ns / 6e10)}</span></p>
+       <table><tr><th>Gate</th><th>Tool</th><th>Result</th><th>Logs</th></tr>${r.gates.map(g => `<tr><td>${esc(g.gate)}</td><td class="mono">${esc(g.tool)}</td><td><span class="${cls[g.level]}">${esc(g.level)}</span> ${esc(g.message)}
+       ${(g.diagnostics || []).map(d => `<div class="diag"><span class="mono">${esc(d.code)}</span> ${esc(d.file || "")}${d.line ? ":" + d.line : ""} ${esc((d.message || "").split("\n")[0]).slice(0, 160)}</div>`).join("")}</td><td>${artLinks(rn, g.artifacts)}</td></tr>`).join("")}</table>`;
+    } catch (e) { $("#gcout").innerHTML = `<p class="fail">${esc(e.message)}</p>` } finally { gb.disabled = false }
+  };
+  const sb = $("#survey");
+  if (sb) sb.onclick = async () => {
+    try { const j = await send("POST", `/api/repos/${enc(rn)}/survey`, { focus: $("#sfocus").value }); toast("Survey started; it waits for your approval when done.", "ok"); go(`tasks/${j.repo}/${j.id}/live`) }
+    catch (e) { toast(esc(e.message), "bad") }
+  };
+}
+
+// Scope suggestions from the module map.
+let sugTimer = null;
+function suggestInto(el, repoName, intent, onPick) {
+  clearTimeout(sugTimer);
+  sugTimer = setTimeout(async () => {
+    if (!intent || intent.trim().length < 8) { el.innerHTML = ""; return }
+    const r = await get(`/api/repos/${enc(repoName)}/suggest?q=${enc(intent)}`).catch(() => ({ suggestions: [] }));
+    el.innerHTML = r.suggestions.length ? `<span class="hint">Suggested from the module map:</span> ` + r.suggestions.map((x, i) =>
+      `<button type="button" class="chip" data-sg="${i}" title="${esc(x.reason)}${x.label ? " — " + esc(x.label) : ""}">+ ${esc(x.scope.join(", "))}</button>`).join(" ") : "";
+    $$("[data-sg]", el).forEach(b => b.onclick = () => onPick(r.suggestions[+b.dataset.sg].scope));
+  }, 400);
 }
 
 // ===== Audit =====

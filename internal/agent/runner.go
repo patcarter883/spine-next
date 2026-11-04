@@ -42,6 +42,11 @@ type Adapter struct {
 	// StallTimeout cancels a run with no protocol traffic for this long.
 	StallTimeout time.Duration `yaml:"stall_timeout"`
 
+	// Context includes the repository context (.spine/context.md, and the
+	// module map for planners) in this agent's prompts. Defaults: on for
+	// pi-rpc (local models need the orientation), off for acp.
+	Context bool `yaml:"-"`
+
 	// Protocol is "acp" (default; Claude Code and other ACP agents) or
 	// "pi-rpc" (the Pi coding agent's RPC mode).
 	Protocol string `yaml:"protocol"`
@@ -90,7 +95,7 @@ const PiVersion = "1.5.0"
 // warns about that.
 func PiAdapter() Adapter {
 	return Adapter{Name: "pi", Argv: []string{"pi"}, Protocol: "pi-rpc", Version: PiVersion, Permissions: "worktree",
-		StallTimeout: 15 * time.Minute}
+		StallTimeout: 15 * time.Minute, Context: true}
 }
 
 // ProcRunner runs a command inside a lease, recording its process group

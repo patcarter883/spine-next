@@ -24,6 +24,15 @@ type Prompt struct {
 	// Agents and Gates list what a planned task may name (planner only).
 	Agents []string
 	Gates  []string
+	// Notes is the repository's .spine/context.md (already capped), for
+	// adapters with context on. Modules is the rendered module map
+	// (planners only).
+	Notes   string
+	Modules string
+	// Survey asks for repository context: labels and caveats in the
+	// module map Spine derived, and a capped context.md.
+	Survey      bool
+	NotesTokens int
 }
 
 // PlanFile is where a planner run writes its plan, relative to the worktree.
@@ -45,11 +54,19 @@ func (p Prompt) Render() string {
 	if p.Plan {
 		return p.renderPlan()
 	}
+	if p.Survey {
+		return p.renderSurvey()
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "spine-task: %s\nspine-attempt: %d\nspine-round: %d\n\n", p.Task, p.Attempt, p.Round)
 	b.WriteString("# Task\n\n")
 	b.WriteString(strings.TrimSpace(p.Intent))
 	b.WriteString("\n")
+	if p.Notes != "" {
+		b.WriteString("\n# Repository notes\n\n")
+		b.WriteString(p.Notes)
+		b.WriteString("\n")
+	}
 	if len(p.Scope) > 0 {
 		b.WriteString("\n# Scope\n\nYou may only change paths matching:\n")
 		for _, s := range p.Scope {
@@ -113,6 +130,13 @@ func (p Prompt) renderPlan() string {
 	b.WriteString("Each task must be reviewable on its own and leave the repository building and its tests passing. Prefer tasks that touch disjoint files so they can run in parallel; when one task needs another's change, list it in `after`.\n\n")
 	fmt.Fprintf(&b, "Write the plan as JSON to `%s` in the current directory, and change nothing else:\n\n", PlanFile)
 	b.WriteString("```json\n{\n  \"notes\": \"optional: assumptions, risks, what you left out\",\n  \"tasks\": [\n    {\n      \"id\": \"short-kebab-id\",\n      \"title\": \"commit subject, under 72 characters\",\n      \"intent\": \"precise instructions for the coding agent: what to change, where, and how to test it\",\n      \"scope\": [\"path/globs/**\", \"the task may change\"],\n      \"after\": [\"ids of tasks that must land first\"]\n    }\n  ]\n}\n```\n\n")
+	if p.Notes != "" {
+		b.WriteString("# Repository notes\n\n" + p.Notes + "\n\n")
+	}
+	if p.Modules != "" {
+		b.WriteString("# Module map (derived from the code and its history)\n\n" + p.Modules + "\n")
+		b.WriteString("Use module boundaries for scopes, include a module's tests in the scope of a task that changes it, and put modules that usually change together in one task or order them with `after`.\n\n")
+	}
 	b.WriteString("Rules: ids match `[a-z0-9][a-z0-9-]{0,40}` and are unique; `after` names only ids in this plan; there are no cycles; every task has a scope; 1 to 12 tasks.\n")
 	if len(p.Agents) > 0 {
 		fmt.Fprintf(&b, "A task may set `\"agent\"` to one of: %s (omit it for the default).\n", strings.Join(p.Agents, ", "))
@@ -134,6 +158,37 @@ func (p Prompt) renderPlan() string {
 	}
 	b.WriteString("\n# Constraints\n\n- Work only inside the current directory.\n- Do not run git commit, git push, git checkout, git reset or git stash.\n")
 	fmt.Fprintf(&b, "- Write only `%s`. When it is written, stop.\n", PlanFile)
+	return b.String()
+}
+
+func (p Prompt) renderSurvey() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "spine-task: %s\nspine-attempt: %d\nspine-round: %d\nspine-kind: survey\n\n", p.Task, p.Attempt, p.Round)
+	b.WriteString("# Task\n\nDescribe this repository for coding agents that will work in it. Write two files and change nothing else.\n\n")
+	b.WriteString("1. `.spine/modules.yaml` was derived from the code and its git history. For each module, set `label` (what it is, at most ten words) and, only where there is a real pitfall, `caveats` (at most two short sentences each: generated code, ordering constraints, files that must change together, slow tests). Do not change any other field, and do not add or remove modules.\n")
+	words := p.NotesTokens * 3 / 4
+	if words <= 0 {
+		words = 900
+	}
+	fmt.Fprintf(&b, "2. `.spine/context.md`: a short factual summary, at most about %d words. Facts only, as terse bullet lists under these headings: Build and test (the exact commands, including how to run one package's or file's tests), Layout (where things live), Conventions (naming, errors, logging, formatting the gates do not already enforce), No-go areas (generated files, vendored code, files never to edit). Verify each command by running it. No tutorials, no history, no restating what the code says.\n", words)
+	if strings.TrimSpace(p.Intent) != "" {
+		b.WriteString("\n# Focus\n\n" + strings.TrimSpace(p.Intent) + "\n")
+	}
+	if p.Notes != "" {
+		b.WriteString("\n# The current context.md (update it; keep what is still true)\n\n" + p.Notes + "\n")
+	}
+	if len(p.Feedback) > 0 {
+		b.WriteString("\n# Problems with your previous attempt\n\n")
+		for _, f := range p.Feedback {
+			if f.Hint != "" {
+				fmt.Fprintf(&b, "- %s: %s\n", f.Source, f.Hint)
+			}
+			for _, d := range f.Diagnostics {
+				fmt.Fprintf(&b, "- %s\n", d.Message)
+			}
+		}
+	}
+	b.WriteString("\n# Constraints\n\n- Work only inside the current directory.\n- Do not run git commit, git push, git checkout, git reset or git stash.\n- Write only `.spine/modules.yaml` (labels and caveats) and `.spine/context.md`. When they are written, stop.\n")
 	return b.String()
 }
 

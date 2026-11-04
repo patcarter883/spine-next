@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/modmap"
 	"github.com/patcarter883/spine-next/internal/tools/diff"
 )
 
@@ -58,6 +59,10 @@ type Env struct {
 	Gates []string
 	// Files are the paths at the base (scope globs that match none warn).
 	Files []string
+	// Modules is the base's module map (.spine/modules.yaml), if any: the
+	// overlap check then also compares modules and co-change history, and
+	// a scope that changes a module without its tests is flagged.
+	Modules *modmap.Map
 	// AllowExisting accepts ids that already exist (re-validating a plan
 	// after part of it was submitted).
 	AllowExisting bool
@@ -213,11 +218,96 @@ func Validate(p api.Plan, env Env) []Issue {
 				}
 				if g, h, ok := overlap(a.Scope, b.Scope); ok {
 					add(Warning, b.ID, "scope", "may run beside %q and both may change %s (%s / %s): add an `after` link or narrow the scopes", a.ID, g, g, h)
+					continue
+				}
+				if env.Modules == nil || len(a.Scope) == 0 || len(b.Scope) == 0 {
+					continue
+				}
+				ma, mb := touched(env.Modules, a.Scope), touched(env.Modules, b.Scope)
+				if m := sharedModule(ma, mb); m != "" {
+					add(Warning, b.ID, "scope", "may run beside %q and both change module %s: expect merge conflicts; add an `after` link or merge the tasks", a.ID, m)
+					continue
+				}
+				if p, ok := coChanged(env.Modules, ma, mb); ok {
+					add(Warning, b.ID, "scope", "may run beside %q, but %s and %s changed together in %d commits: they likely need coordinated edits (add an `after` link)", a.ID, p.A, p.B, p.Commits)
 				}
 			}
 		}
 	}
+	if env.Modules != nil {
+		for _, t := range p.Tasks {
+			for _, m := range missedTests(env.Modules, t.Scope) {
+				add(Warning, strings.TrimSpace(t.ID), "scope", "changes module %s but not its tests (e.g. %s): add them to the scope so the agent can update them", m.Name, m.Tests[0])
+			}
+		}
+	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Level == Error && out[j].Level != Error })
+	return out
+}
+
+// touched lists the modules a scope may change.
+func touched(m *modmap.Map, scope []string) map[string]bool {
+	out := map[string]bool{}
+	for _, g := range scope {
+		for _, mod := range m.Touched(strings.TrimSpace(g)) {
+			out[mod.Name] = true
+		}
+	}
+	return out
+}
+
+func sharedModule(a, b map[string]bool) string {
+	var shared []string
+	for m := range a {
+		if b[m] && m != "." {
+			shared = append(shared, m)
+		}
+	}
+	sort.Strings(shared)
+	if len(shared) == 0 {
+		return ""
+	}
+	return shared[0]
+}
+
+func coChanged(m *modmap.Map, a, b map[string]bool) (modmap.Pair, bool) {
+	var best modmap.Pair
+	found := false
+	for x := range a {
+		for y := range b {
+			if p, ok := m.Pair(x, y); ok && (!found || p.Commits > best.Commits) {
+				best, found = p, true
+			}
+		}
+	}
+	return best, found
+}
+
+// missedTests are modules whose source the scope covers but none of whose
+// own tests it does.
+func missedTests(m *modmap.Map, scope []string) []*modmap.Module {
+	if len(scope) == 0 {
+		return nil
+	}
+	var out []*modmap.Module
+	seen := map[string]bool{}
+	for _, g := range scope {
+		for _, mod := range m.Touched(strings.TrimSpace(g)) {
+			if seen[mod.Name] || len(mod.Tests) == 0 {
+				continue
+			}
+			seen[mod.Name] = true
+			covered := false
+			for _, t := range mod.Tests {
+				for _, h := range scope {
+					covered = covered || diff.MatchGlob(strings.TrimSpace(h), t)
+				}
+			}
+			if !covered {
+				out = append(out, mod)
+			}
+		}
+	}
 	return out
 }
 
@@ -349,10 +439,13 @@ func globsOverlap(g, h string) bool {
 		return true
 	}
 	pg, ph := literalPrefix(g), literalPrefix(h)
+	gw, hw := pg != g, ph != h
+	if !gw || !hw {
+		return false // a literal path overlaps only what matches it (checked above)
+	}
 	if pg == ph {
 		return true
 	}
-	gw, hw := pg != g, ph != h
 	switch {
 	case gw && strings.HasPrefix(ph, pg):
 		return true

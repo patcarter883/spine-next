@@ -47,6 +47,9 @@ Other commands:
 | `spine hint ID "text"` | Give the next repair round a hint. An escalated task resumes in its kept worktree. |
 | `spine rollback ID SNAPSHOT` | Continue a stopped task from one of its snapshots. |
 | `spine plan "goal"` | A planner agent proposes a task breakdown for review; `plan validate FILE` and `plan submit FILE` check and submit a plan. |
+| `spine gates check [REV]` | Dry-run the gates on `main` (or REV) with no agent: which gates a task can pass. |
+| `spine survey [focus]` | Refresh the repository context (module map labels, `.spine/context.md`) through a task. |
+| `spine modules [--write]` | Print (or write) the derived module map. |
 | `spine pause [reason]` / `spine resume` | Stop or allow starting new tasks in this repository; running tasks finish. |
 | `spine users add NAME --role R` | Add a dashboard user (viewer, operator or admin); prints a token once. Also `users list` and `users remove`. |
 | `spine controller` | Run the controller in the foreground. It reconciles every task and resumes after a crash or `kill -9`. |
@@ -180,6 +183,54 @@ Every other command works the same under the supervisor. `spine run`, `status`, 
 - **Remote and read-only:** a non-loopback `--addr` is refused unless users exist. `--tls-cert/--tls-key` serve HTTPS, and `--read-only` rejects every change whoever asks. `spine supervisor status` reads `SPINE_TOKEN`.
 
 `internal/e2e/ui_test.go` drives these features through a real controller and a scripted agent. It covers diffs, rounds, logs, hints, rollback, the live stream, pausing, editing, bulk actions, GC and a planner run. `internal/ui/auth_test.go` covers roles, sessions, read-only mode and the audit log.
+
+## Repository context
+
+Agents work better with a few facts about the repository: how to build and test it, where things live, and which parts change together. Spine derives most of this and keeps the rest short and reviewed. It does not inject long reference docs into prompts.
+
+**Onboarding**
+1. **Gates check.** `spine gates check [REV] [--file .spine/gates.yaml]` dry-runs the base's gates (or a draft) on `main` or REV, with no agent.
+   - It shows which gates pass, which have pre-existing failures that a baseline policy excuses, and which only judge a task's diff.
+   - It also flags which gates fail outright, so that no task could ever pass them. This is the prerequisite: fix those, or switch them to `policy: baseline`.
+   - The dashboard's **Health** page has the same check.
+2. **Survey.** `spine survey [focus]` (or **Run survey** on the Health page) submits a survey task:
+   - Spine derives `.spine/modules.yaml` in the task's worktree.
+   - An agent adds short `label`s and `caveats` and writes `.spine/context.md`.
+   - The `scope`, `nonempty` and `spine.context` gates check the result, and it waits for your approval like any change.
+   - `spine.context` rejects edits to derived fields and a `context.md` over its token cap.
+
+**`.spine/modules.yaml`** is derived, not written. `spine modules` prints it; `--write` puts it in your checkout.
+- **Modules:** boundaries come from `go.mod`, `package.json`, `pyproject.toml` and the source layout. Imports between modules come from go/parser for Go and tree-sitter for TypeScript, JavaScript and Python.
+- **Tests:** each module's own tests, plus the other tests that import it.
+- **Co-change:** modules that changed together in the last 1,000 commits.
+
+Like `gates.yaml`, it is read from the base branch only. It is used in three places:
+- **Planner prompts:** planners get a capped rendering of the map.
+- **`spec.validate`:** two tasks that may run in parallel are flagged when they change the same module, or modules that usually change together. A scope that changes a module but none of its tests is flagged too.
+- **Scope suggestions:** the new-task form and the plan editor suggest scopes from the intent.
+
+**`.spine/context.md`** is a factual summary: build and test commands, layout, conventions and no-go areas.
+- **Cap:** `context.notes_tokens` (default 1,200 tokens) is a hard limit.
+- **Who gets it:** adapters with `context: true` (the default for `pi-rpc`) get it in every prompt; Claude (ACP) is off by default (`adapters.claude.context: true` turns it on).
+- **Staleness:** `spine doctor` and the Health page warn when the map is more than `context.stale_after` commits behind the base (default 200, counting only commits outside `.spine/`).
+
+**Measuring before it becomes a default**
+- **What's recorded:** each agent run records what context it received.
+- **Control arm:** `context.experiment: 0.3` runs a stable 30 % of tasks without context.
+- **Comparison:** the **Quality** view compares the two groups on plan-rejected rounds per planner task, the first-round pass rate of local-model (Pi) tasks, and tasks hitting merge conflicts.
+
+```yaml
+# .spine/config.yaml
+context:
+  notes_tokens: 1200
+  modules_tokens: 1500
+  stale_after: 200
+  experiment: 0        # fraction of tasks run without context, for measurement
+adapters:
+  claude: {context: true}   # opt Claude in
+```
+
+`TestRepositoryContext` in `internal/e2e` covers the whole flow. A survey whose agent edits a derived field is sent back by the gate, then fixed and approved. Afterwards the worker prompt carries `context.md`, the planner prompt carries the labelled map, and the dashboard's gates check, context status, suggestions and module-aware validation all see it.
 
 ## Status: MVP (M0–M2 complete; M3 LLM supervisor and M4 dashboard implemented, not yet validated against live models)
 

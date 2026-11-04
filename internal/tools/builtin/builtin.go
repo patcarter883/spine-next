@@ -2,6 +2,7 @@
 package builtin
 
 import (
+	"github.com/patcarter883/spine-next/internal/modmap"
 	"github.com/patcarter883/spine-next/internal/tools"
 	"github.com/patcarter883/spine-next/internal/tools/ast"
 	"github.com/patcarter883/spine-next/internal/tools/build"
@@ -17,5 +18,6 @@ func New(o tools.Options, runner *build.Runner) *tools.Registry {
 	r.MustRegister(diff.Tools()...)
 	r.MustRegister(runner.Tools()...)
 	r.MustRegister(ast.Tools(nil)...)
+	r.MustRegister(modmap.CheckTool{})
 	return r
 }

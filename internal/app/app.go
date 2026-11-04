@@ -112,3 +112,18 @@ func Open(ctx context.Context, repo string, o Options) (*App, error) {
 
 // Close releases the database.
 func (a *App) Close() error { return a.Store.Close() }
+
+// GateEngine builds a gate engine for read-only use outside a controller
+// (`spine gates check`, the dashboard): no result cache (the cache lives in
+// the database the controller owns); full logs still go to the artifact
+// store.
+func GateEngine(commonDir string) *gate.Engine {
+	cache, _ := os.UserCacheDir()
+	if cache == "" {
+		cache = os.TempDir()
+	}
+	scratch := filepath.Join(cache, "spine", "scratch")
+	reg := builtin.New(tools.Options{},
+		&build.Runner{ScratchDir: scratch, Artifacts: &artifacts.Store{Dir: filepath.Join(commonDir, "spine", "artifacts")}})
+	return &gate.Engine{Reg: reg, ScratchDir: scratch}
+}

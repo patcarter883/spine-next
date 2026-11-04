@@ -132,8 +132,13 @@ adapters:
 		detected = []string{"no known toolchain"}
 	}
 	fmt.Printf("\ndetected  %s\n", strings.Join(detected, ", "))
-	fmt.Println("next      review the files, then: git add .spine && git commit -m 'Add Spine config'")
-	fmt.Println("          spine doctor --agent")
-	fmt.Println(`          spine run "describe the change"`)
+	fmt.Println("onboarding")
+	fmt.Println("  stage 1  check the gates with no agent:  spine gates check --file .spine/gates.yaml")
+	fmt.Println("           (fix or set policy: baseline on any gate that fails on main), then")
+	fmt.Println("           git add .spine && git commit -m 'Add Spine config' && spine doctor --agent")
+	fmt.Println("  stage 2  describe the repository for agents:  spine survey")
+	fmt.Println("           (derives .spine/modules.yaml, an agent labels it and writes .spine/context.md;")
+	fmt.Println("           review and approve it like any change)")
+	fmt.Println(`  then     spine run "describe the change"   or   spine plan "a larger goal"`)
 	return nil
 }

@@ -35,6 +35,15 @@ type Config struct {
 	WorktreeRoot string
 	Resync       time.Duration
 	Supervisor   Supervisor
+	Context      Context
+}
+
+// Context configures the repository context given to agents.
+type Context struct {
+	NotesTokens   int     // cap for .spine/context.md (default 1200)
+	ModulesTokens int     // cap for the module map in planner prompts (default 1500)
+	StaleAfter    int     // commits after which the files count as stale (default 200)
+	Experiment    float64 // fraction of tasks run without context, for measurement (0..1)
 }
 
 // Supervisor selects how failed rounds are decided (RFC §3.5).
@@ -60,6 +69,7 @@ type rawAdapter struct {
 	Mode         *string           `yaml:"mode"`
 	Permissions  string            `yaml:"permissions"`
 	StallTimeout string            `yaml:"stall_timeout"`
+	Context      *bool             `yaml:"context"`
 }
 
 type rawBudget struct {
@@ -85,7 +95,13 @@ type raw struct {
 	Identity     worktree.Identity     `yaml:"identity"`
 	WorktreeRoot string                `yaml:"worktree_root"`
 	Resync       string                `yaml:"resync"`
-	Supervisor   struct {
+	Context      struct {
+		NotesTokens   int     `yaml:"notes_tokens"`
+		ModulesTokens int     `yaml:"modules_tokens"`
+		StaleAfter    int     `yaml:"stale_after"`
+		Experiment    float64 `yaml:"experiment"`
+	} `yaml:"context"`
+	Supervisor struct {
 		Type    string `yaml:"type"`
 		Model   string `yaml:"model"`
 		Effort  string `yaml:"effort"`
@@ -103,6 +119,7 @@ func Default() Config {
 		Budget:     api.Budget{}.WithDefaults(),
 		Resync:     15 * time.Second,
 		Supervisor: Supervisor{Type: "rules"},
+		Context:    Context{NotesTokens: 1200, ModulesTokens: 1500, StaleAfter: 200},
 	}
 }
 
@@ -166,6 +183,10 @@ func Parse(b []byte) (Config, error) {
 		}
 		if ra.Mode != nil {
 			a.Mode = *ra.Mode
+		}
+		a.Context = a.Protocol == "pi-rpc"
+		if ra.Context != nil {
+			a.Context = *ra.Context
 		}
 		d, err := dur(ra.StallTimeout, "adapters."+name+".stall_timeout")
 		if err != nil {
@@ -234,6 +255,19 @@ func Parse(b []byte) (Config, error) {
 	} else if d > 0 {
 		c.Resync = d
 	}
+	if r.Context.NotesTokens > 0 {
+		c.Context.NotesTokens = r.Context.NotesTokens
+	}
+	if r.Context.ModulesTokens > 0 {
+		c.Context.ModulesTokens = r.Context.ModulesTokens
+	}
+	if r.Context.StaleAfter > 0 {
+		c.Context.StaleAfter = r.Context.StaleAfter
+	}
+	if r.Context.Experiment < 0 || r.Context.Experiment > 1 {
+		return Config{}, fmt.Errorf("config: context.experiment must be between 0 and 1")
+	}
+	c.Context.Experiment = r.Context.Experiment
 	sv := r.Supervisor
 	switch sv.Type {
 	case "", "rules":
@@ -349,4 +383,28 @@ func (c Config) AdapterNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// SurveySpec is a survey task: refresh .spine/modules.yaml (labels,
+// caveats) and .spine/context.md, checked by the scope, nonempty and
+// spine.context gates and held for approval.
+func (c Config) SurveySpec(focus, agentName, who string) (api.Spec, error) {
+	spec, err := c.NewSpec(TaskInput{Title: "Survey: refresh repository context", Intent: strings.TrimSpace(focus + "\n"),
+		Agent: agentName, MaxAttempts: 1, MaxRounds: 2, CreatedBy: who, RequireApproval: true,
+		Scope: []string{".spine/modules.yaml", ".spine/context.md"}})
+	if err != nil && strings.Contains(err.Error(), "intent") {
+		spec, err = c.NewSpec(TaskInput{Title: "Survey: refresh repository context", Intent: "Survey the repository.",
+			Agent: agentName, MaxAttempts: 1, MaxRounds: 2, CreatedBy: who, RequireApproval: true,
+			Scope: []string{".spine/modules.yaml", ".spine/context.md"}})
+	}
+	if err != nil {
+		return spec, err
+	}
+	spec.Kind = api.KindSurvey
+	spec.Acceptance = []api.GateRef{
+		{Name: "scope", Tool: "diff.scope", Policy: api.Absolute},
+		{Name: "nonempty", Tool: "diff.nonempty", Policy: api.Absolute},
+		{Name: "context", Tool: "spine.context", Policy: api.Absolute, Args: map[string]any{"notes_tokens": c.Context.NotesTokens}},
+	}
+	return spec, nil
 }

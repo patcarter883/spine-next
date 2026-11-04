@@ -14,6 +14,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/gate"
 	"github.com/patcarter883/spine-next/internal/gitro"
 	"github.com/patcarter883/spine-next/internal/inbox"
+	"github.com/patcarter883/spine-next/internal/modmap"
 	"github.com/patcarter883/spine-next/internal/plan"
 )
 
@@ -248,6 +249,9 @@ func (s *Server) planEnv(ctx context.Context, repo Repo, base string) (plan.Env,
 	}
 	if gc, err := gatesAt(ctx, repo.Path, base); err == nil {
 		env.Gates = gc.Order
+	}
+	if m, ok, err := modmap.Load(ctx, repo.Path, base); ok && err == nil {
+		env.Modules = m
 	}
 	if out, err := (gitro.Repo{Dir: repo.Path}).Run(ctx, "ls-tree", "-r", "-z", "--name-only", base); err == nil {
 		for _, f := range strings.Split(string(out), "\x00") {

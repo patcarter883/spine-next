@@ -89,7 +89,70 @@ type stats struct {
 		FailReasons    []count   `json:"fail_reasons"`
 		Supervisors    []supStat `json:"supervisors"`
 		OutcomeReasons []count   `json:"outcome_reasons"`
+		Context        []ctxRow  `json:"context"`
+		ControlTasks   int       `json:"context_control_tasks"`
 	} `json:"quality"`
+}
+
+// ctxRow compares one metric between tasks whose agents had repository
+// context and tasks whose agents did not (including the experiment's
+// control arm).
+type ctxRow struct {
+	Metric   string  `json:"metric"`
+	With     float64 `json:"with"`
+	WithN    int     `json:"with_n"`
+	Without  float64 `json:"without"`
+	WithoutN int     `json:"without_n"`
+	Lower    bool    `json:"lower_is_better"`
+}
+
+type ctxTask struct {
+	seen, with, control, pi, firstKnown, firstPass, conflict bool
+	kind                                                     string
+	rejected                                                 int
+}
+
+func contextRows(ts map[string]*ctxTask) []ctxRow {
+	agg := func(metric string, lower bool, pick func(*ctxTask) (float64, bool)) ctxRow {
+		r := ctxRow{Metric: metric, Lower: lower}
+		var sw, so float64
+		for _, t := range ts {
+			if !t.seen {
+				continue
+			}
+			v, ok := pick(t)
+			if !ok {
+				continue
+			}
+			if t.with {
+				sw += v
+				r.WithN++
+			} else {
+				so += v
+				r.WithoutN++
+			}
+		}
+		if r.WithN > 0 {
+			r.With = sw / float64(r.WithN)
+		}
+		if r.WithoutN > 0 {
+			r.Without = so / float64(r.WithoutN)
+		}
+		return r
+	}
+	b2f := func(b bool) float64 {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	return []ctxRow{
+		agg("plan-rejected rounds per planner task", true, func(t *ctxTask) (float64, bool) { return float64(t.rejected), t.kind == "plan" }),
+		agg("local-model (Pi) first-round pass rate", false, func(t *ctxTask) (float64, bool) {
+			return b2f(t.firstPass), t.pi && t.firstKnown && t.kind == ""
+		}),
+		agg("tasks hitting merge conflicts", true, func(t *ctxTask) (float64, bool) { return b2f(t.conflict), t.kind == "" }),
+	}
 }
 
 type taskCost struct {
@@ -156,6 +219,7 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 	sups := map[string]*supStat{}
 	var rounds, attempts []float64
 	var costs []taskCost
+	ctxTasks := map[string]*ctxTask{}
 	for _, repo := range s.repos(ctx) {
 		if repo.Store == nil || (only != "" && repo.Name != only) {
 			continue
@@ -217,7 +281,16 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 			costs = append(costs, tc)
 			rs.Tokens += t.Status.TokensUsed
 		}
-		evs, _ := repo.Store.ListEventsByKind(ctx, since, 0, "outcome", "transition", "decision", "verdict", "command")
+		evs, _ := repo.Store.ListEventsByKind(ctx, since, 0, "outcome", "transition", "decision", "verdict", "command", "agent_start", "plan_rejected")
+		for _, t := range tasks {
+			ctxTasks[repo.Name+"/"+string(t.ID)] = &ctxTask{kind: t.Spec.Kind}
+		}
+		ct := func(id api.TaskID) *ctxTask {
+			if c := ctxTasks[repo.Name+"/"+string(id)]; c != nil {
+				return c
+			}
+			return &ctxTask{}
+		}
 		roundsBy := map[api.TaskID]int{}
 		costBy := map[api.TaskID]float64{}
 		escAt := map[api.TaskID]time.Time{}
@@ -237,6 +310,22 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 		}
 		for _, e := range evs {
 			switch e.Kind {
+			case "agent_start":
+				var d struct {
+					Attempt, Round int
+					Protocol       string `json:"protocol"`
+					Context        struct {
+						Notes, Modules, Control bool
+					} `json:"context"`
+				}
+				json.Unmarshal(e.Data, &d)
+				if c := ct(e.TaskID); !c.seen {
+					c.seen, c.pi = true, d.Protocol == "pi-rpc"
+					c.with = d.Context.Notes || d.Context.Modules
+					c.control = d.Context.Control
+				}
+			case "plan_rejected":
+				ct(e.TaskID).rejected++
 			case "outcome":
 				var o api.Outcome
 				json.Unmarshal(e.Data, &o)
@@ -295,6 +384,15 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 					} `json:"verdict"`
 				}
 				json.Unmarshal(e.Data, &d)
+				if c := ct(e.TaskID); !d.OnMerge && !c.firstKnown {
+					c.firstKnown = true
+					c.firstPass = true
+					for _, g := range d.Verdict.Gates {
+						if !g.Passed() {
+							c.firstPass = false
+						}
+					}
+				}
 				if !d.OnMerge {
 					n := 0
 					for _, g := range d.Verdict.Gates {
@@ -306,13 +404,17 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 				}
 			case "decision":
 				var d struct {
-					Supervisor string `json:"supervisor"`
-					Fallback   string `json:"fallback_reason"`
+					Conflicts  []string `json:"conflicts"`
+					Supervisor string   `json:"supervisor"`
+					Fallback   string   `json:"fallback_reason"`
 					Decision   struct {
 						Action string `json:"action"`
 					} `json:"decision"`
 				}
 				json.Unmarshal(e.Data, &d)
+				if len(d.Conflicts) > 0 {
+					ct(e.TaskID).conflict = true
+				}
 				name := d.Supervisor
 				if name == "" {
 					name = "rules"
@@ -407,6 +509,12 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 	st.Quality.AvgRounds, st.Quality.AvgAttempts = mean(rounds), mean(attempts)
 	st.Quality.Escalations, st.Quality.FailingGates = sorted(escal), sorted(failGates)
 	st.Quality.FailReasons, st.Quality.OutcomeReasons = sorted(failReasons), sorted(outcomes)
+	st.Quality.Context = contextRows(ctxTasks)
+	for _, c := range ctxTasks {
+		if c.control {
+			st.Quality.ControlTasks++
+		}
+	}
 	for _, sp := range sups {
 		st.Quality.Supervisors = append(st.Quality.Supervisors, *sp)
 	}
@@ -534,6 +642,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	h := healthReport{Repo: repo.Name, Stuck: []string{}, Rejected: []string{}}
 	h.Findings = append(doctor.Run(ctx, repo.Path), doctor.Agent(ctx, repo.Path, r.URL.Query().Get("probe") == "1")...)
+	h.Findings = append(h.Findings, doctor.Context(ctx, repo.Path)...)
 	h.DBBytes, h.WALBytes = repo.Store.Sizes()
 	var fs syscall.Statfs_t
 	if syscall.Statfs(repo.Path, &fs) == nil {

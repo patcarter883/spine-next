@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/modmap"
 )
 
 func has(is []Issue, l Level, sub string) bool {
@@ -69,5 +70,35 @@ func TestValidate(t *testing.T) {
 	}
 	if is[0].Level != Error {
 		t.Fatal("errors not first")
+	}
+}
+
+func TestValidateWithModules(t *testing.T) {
+	m := &modmap.Map{Version: 1, Modules: []modmap.Module{
+		{Name: "api", Language: "go", Tests: []string{"api/handler_test.go"}, NTests: 1},
+		{Name: "store", Language: "go", Tests: []string{"store/store_test.go"}, NTests: 1},
+		{Name: "web", Language: "typescript"},
+	}, CoChange: []modmap.Pair{{A: "api", B: "store", Commits: 9, Strength: 0.8}}}
+	env := Env{Modules: m}
+	p := api.Plan{Tasks: []api.PlanTask{
+		{ID: "a", Intent: "change the handler signature everywhere", Scope: []string{"api/handler.go"}},
+		{ID: "b", Intent: "change the store interface for the handler", Scope: []string{"store/**"}},
+		{ID: "c", Intent: "another change to the same api package", Scope: []string{"api/routes.go", "api/*_test.go"}},
+		{ID: "d", Intent: "frontend work that is independent of the api", Scope: []string{"web/**"}},
+	}}
+	is := Validate(p, env)
+	for _, want := range []string{
+		`a.scope: changes module api but not its tests`,
+		`c.scope: may run beside "a" and both change module api`,
+		`b.scope: may run beside "a", but api and store changed together in 9 commits`,
+	} {
+		if !has(is, Warning, want) {
+			t.Errorf("missing %q in\n%v", want, is)
+		}
+	}
+	for _, i := range is {
+		if strings.HasPrefix(i.Task, "d") || strings.Contains(i.Message, `beside "d"`) || (i.Task == "b" && strings.Contains(i.Message, "tests")) || (i.Task == "c" && strings.Contains(i.Message, "tests")) {
+			t.Errorf("unexpected: %s", i)
+		}
 	}
 }

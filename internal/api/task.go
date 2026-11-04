@@ -36,6 +36,11 @@ type Spec struct {
 // KindPlan marks a planner task.
 const KindPlan = "plan"
 
+// KindSurvey marks a survey task: it refreshes the repository context
+// (.spine/modules.yaml labels and caveats, .spine/context.md), which then
+// integrates through gates and approval like any change.
+const KindSurvey = "survey"
+
 // Budget bounds a task (RFC §3.1). Zero fields take defaults.
 type Budget struct {
 	MaxAttempts    int           `json:"max_attempts"`

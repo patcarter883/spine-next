@@ -160,3 +160,25 @@ parallel: 3
 		t.Fatal("a bad duration must not validate")
 	}
 }
+
+func TestSupervisorProvider(t *testing.T) {
+	local, model, none := "local", "m", ""
+	out, err := ApplySettings([]byte("# keep\nsupervisor:\n  type: llm\n"), Settings{SupervisorProvider: &local, SupervisorModel: &model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Parse(out)
+	if err != nil || c.Supervisor.Provider != "local" || c.Supervisor.Model != "m" || !strings.Contains(string(out), "# keep") {
+		t.Fatalf("%v %+v\n%s", err, c.Supervisor, out)
+	}
+	if _, err := ApplySettings(out, Settings{SupervisorModel: &none}); err == nil {
+		t.Fatal("a provider without a model must not validate")
+	}
+	out, err = ApplySettings(out, Settings{SupervisorProvider: &none, SupervisorModel: &none})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = Parse(out); c.Supervisor.Provider != "" || c.Supervisor.Type != "llm" || strings.Contains(string(out), "provider") {
+		t.Fatalf("%+v\n%s", c.Supervisor, out)
+	}
+}

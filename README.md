@@ -260,6 +260,18 @@ Credentials come from the environment, the same way the Anthropic SDK finds them
 
 The model never writes status, and it cannot choose Verify or Merge.
 
+The supervisor can use a different provider from the agents, for example a local model while Claude does the coding, or the reverse. Name a provider from Pi's `models.json`, which must use `openai-completions` and support `response_format: json_schema` (llama.cpp through Lemonade does):
+
+```yaml
+supervisor:
+  type: llm
+  provider: local
+  model: Qwen3.6-35B-A3B-MTP-GGUF
+  timeout: 5m           # allow for a local model loading and thinking
+```
+
+It is a direct API call with no tools, not a coding agent, and `effort` doesn't apply. `$NAME` keys are read from the controller's environment; a `!command` key is refused rather than run, so that decision falls back to the rules. `spine doctor --agent` checks the provider, and **Settings** can select it.
+
 Tests run against a fake Messages API (`internal/reconciler/llm_test.go`, `internal/e2e/llm_test.go`). The M3 exit criterion, an A/B comparison with the rule supervisor on the corpus (pass rate at least equal, fewer tokens per task), needs live model runs and has not been done.
 
 

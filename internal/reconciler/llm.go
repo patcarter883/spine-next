@@ -1,19 +1,27 @@
 package reconciler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 
+	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 )
 
-// LLMSupervisor asks Claude to choose the next action (RFC §3.5, M3). The
+const llmMaxTokens = 16000
+
+// LLMSupervisor asks a model to choose the next action (RFC §3.5, M3): Claude
+// through the Anthropic API, or a provider from Pi's models.json. It is a
+// direct API call with no tools, not a coding agent. The
 // response is constrained by structured outputs to a JSON object whose
 // action enum is exactly Observation.Legal, so the model cannot name an
 // action the budget forbids; the reconciler re-checks legality anyway and
@@ -25,12 +33,22 @@ import (
 type LLMSupervisor struct {
 	Client  anthropic.Client
 	Model   string        // default claude-opus-5-5
-	Effort  string        // low|medium|high|xhigh|max (default medium)
+	Effort  string        // low|medium|high|xhigh|max (default medium; Anthropic API only)
 	Timeout time.Duration // per decision (default 2m)
+	// Provider, when set, sends decisions to LoadProvider's server instead of
+	// the Anthropic API. It is loaded per decision, so a models.json edit
+	// applies to the next one, and a failure falls back like any other.
+	Provider     string
+	LoadProvider func() (agent.PiProvider, error)
 }
 
 // Name identifies the supervisor in decision events.
-func (s *LLMSupervisor) Name() string { return "llm:" + s.model() }
+func (s *LLMSupervisor) Name() string {
+	if s.Provider != "" {
+		return "llm:" + s.Provider + "/" + s.model()
+	}
+	return "llm:" + s.model()
+}
 
 func (s *LLMSupervisor) model() string {
 	if s.Model == "" {
@@ -136,40 +154,17 @@ func (s *LLMSupervisor) Decide(ctx context.Context, o Observation) (api.Decision
 		"required":             []string{"action", "reason", "hint", "focus"},
 		"additionalProperties": false,
 	}
-	effort := anthropic.OutputConfigEffort(s.Effort)
-	if effort == "" {
-		effort = anthropic.OutputConfigEffortMedium
+	user := "Task state (JSON):\n" + string(obs) + "\n\nChoose the next action."
+	complete := s.completeAnthropic
+	if s.Provider != "" {
+		complete = s.completeProvider
 	}
-	resp, err := s.Client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     s.model(),
-		MaxTokens: 16000,
-		System:    []anthropic.TextBlockParam{{Text: llmSystem}},
-		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(
-			"Task state (JSON):\n" + string(obs) + "\n\nChoose the next action.")),
-		},
-		OutputConfig: anthropic.OutputConfigParam{
-			Effort: effort,
-			Format: anthropic.JSONOutputFormatParam{Schema: schema},
-		},
-	})
+	text, err := complete(ctx, user, schema)
 	if err != nil {
 		return api.Decision{}, fmt.Errorf("llm supervisor: %w", err)
 	}
-	switch resp.StopReason {
-	case anthropic.StopReasonEndTurn:
-	case anthropic.StopReasonRefusal:
-		return api.Decision{}, errors.New("llm supervisor: model refused")
-	default:
-		return api.Decision{}, fmt.Errorf("llm supervisor: stop reason %q", resp.StopReason)
-	}
-	var text strings.Builder
-	for _, b := range resp.Content {
-		if t, ok := b.AsAny().(anthropic.TextBlock); ok {
-			text.WriteString(t.Text)
-		}
-	}
 	var d llmDecision
-	if err := json.Unmarshal([]byte(text.String()), &d); err != nil {
+	if err := json.Unmarshal([]byte(text), &d); err != nil {
 		return api.Decision{}, fmt.Errorf("llm supervisor: output is not the decision schema: %w", err)
 	}
 	known := map[string]bool{}
@@ -189,4 +184,111 @@ func (s *LLMSupervisor) Decide(ctx context.Context, o Observation) (api.Decision
 		dec.Reason = "LLM"
 	}
 	return dec, nil
+}
+
+func (s *LLMSupervisor) completeAnthropic(ctx context.Context, user string, schema map[string]any) (string, error) {
+	effort := anthropic.OutputConfigEffort(s.Effort)
+	if effort == "" {
+		effort = anthropic.OutputConfigEffortMedium
+	}
+	resp, err := s.Client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     s.model(),
+		MaxTokens: llmMaxTokens,
+		System:    []anthropic.TextBlockParam{{Text: llmSystem}},
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},
+		OutputConfig: anthropic.OutputConfigParam{
+			Effort: effort,
+			Format: anthropic.JSONOutputFormatParam{Schema: schema},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	switch resp.StopReason {
+	case anthropic.StopReasonEndTurn:
+	case anthropic.StopReasonRefusal:
+		return "", errors.New("model refused")
+	default:
+		return "", fmt.Errorf("stop reason %q", resp.StopReason)
+	}
+	var text strings.Builder
+	for _, b := range resp.Content {
+		if t, ok := b.AsAny().(anthropic.TextBlock); ok {
+			text.WriteString(t.Text)
+		}
+	}
+	return text.String(), nil
+}
+
+// completeProvider calls an OpenAI-compatible chat completions endpoint with
+// the decision schema as a structured output.
+func (s *LLMSupervisor) completeProvider(ctx context.Context, user string, schema map[string]any) (string, error) {
+	if s.LoadProvider == nil {
+		return "", fmt.Errorf("provider %q is not configured", s.Provider)
+	}
+	p, err := s.LoadProvider()
+	if err != nil {
+		return "", err
+	}
+	key, err := p.ResolveKey()
+	if err != nil {
+		return "", err
+	}
+	body, err := json.Marshal(map[string]any{
+		"model":      s.model(),
+		"max_tokens": llmMaxTokens,
+		"stream":     false,
+		"messages": []map[string]string{
+			{"role": "system", "content": llmSystem},
+			{"role": "user", "content": user},
+		},
+		"response_format": map[string]any{"type": "json_schema",
+			"json_schema": map[string]any{"name": "decision", "strict": true, "schema": schema}},
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("provider %s: HTTP %d: %s", s.Provider, resp.StatusCode, trunc(string(raw), 300))
+	}
+	var out struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content string `json:"content"`
+				Refusal string `json:"refusal"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("provider %s: bad response: %w", s.Provider, err)
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("provider %s: no choices in the response", s.Provider)
+	}
+	c := out.Choices[0]
+	if c.Message.Refusal != "" {
+		return "", errors.New("model refused")
+	}
+	if c.FinishReason != "stop" {
+		return "", fmt.Errorf("provider %s: finish reason %q", s.Provider, c.FinishReason)
+	}
+	return c.Message.Content, nil
 }

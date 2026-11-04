@@ -48,17 +48,7 @@ const (
 
 var piAPIs = []string{"openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"}
 
-// piAdapter is the adapter the Pi settings apply to: the default agent if it
-// is a Pi one, else the one named pi.
-func piAdapter(cfg config.Config) agent.Adapter {
-	if a := cfg.Adapters[cfg.Agent]; a.Protocol == "pi-rpc" {
-		return a
-	}
-	if a, ok := cfg.Adapters["pi"]; ok && a.Protocol == "pi-rpc" {
-		return a
-	}
-	return agent.PiAdapter()
-}
+func piAdapter(cfg config.Config) agent.Adapter { return cfg.PiAdapter() }
 
 func piImageOf(a agent.Adapter) (image, runtime string) {
 	if a.Container != nil {

@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/gitro"
@@ -127,10 +128,27 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		out["settings"] = map[string]any{"agent": cfg.Agent, "parallel": cfg.Parallel, "base": strings.TrimPrefix(cfg.Base, "refs/heads/"),
 			"max_attempts": cfg.Budget.MaxAttempts, "max_patch_rounds": cfg.Budget.MaxPatchRounds, "max_tokens": cfg.Budget.MaxTokens,
 			"max_wall_clock": cfg.Budget.MaxWallClock.String(), "per_run_timeout": cfg.Budget.PerRunTimeout.String(),
-			"supervisor": cfg.Supervisor.Type}
+			"supervisor": cfg.Supervisor.Type, "supervisor_provider": cfg.Supervisor.Provider, "supervisor_model": cfg.Supervisor.Model}
 		out["adapters"] = describeAdapters(cfg)
+		out["supervisor_providers"] = supervisorProviders(cfg)
 	}
 	writeJSON(w, out)
+}
+
+// supervisorProviders lists the models.json providers the LLM supervisor can
+// call, with no keys.
+func supervisorProviders(cfg config.Config) []piProvider {
+	out := []piProvider{}
+	doc, _, err := loadPiModels(filepath.Join(agent.PiAgentDir(cfg.PiAdapter()), piModelsFile))
+	if err != nil {
+		return out
+	}
+	for _, p := range piProviders(doc) {
+		if p.API == agent.PiAPIOpenAI {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // putConfig validates and writes .spine/config.yaml: either the whole file

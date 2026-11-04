@@ -178,3 +178,34 @@ func TestPiAgentDirReachesHostRun(t *testing.T) {
 		t.Fatal("other agents don't need it")
 	}
 }
+
+func TestLoadPiProviderAndKeys(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "models.json"), []byte(`{"providers":{"local":{"baseUrl":"http://h/v1","api":"openai-completions","apiKey":"$SPINE_TEST_KEY"},
+	 "claude":{"baseUrl":"http://h","api":"anthropic-messages"}}}`), 0o600)
+	p, err := LoadPiProvider(dir, "local")
+	if err != nil || p.BaseURL != "http://h/v1" {
+		t.Fatalf("%+v %v", p, err)
+	}
+	if _, err := p.ResolveKey(); err == nil {
+		t.Fatal("an unset variable must be an error")
+	}
+	t.Setenv("SPINE_TEST_KEY", "secret")
+	if k, err := p.ResolveKey(); err != nil || k != "secret" {
+		t.Fatalf("%q %v", k, err)
+	}
+	if _, err := LoadPiProvider(dir, "claude"); err == nil {
+		t.Fatal("other APIs are not callable")
+	}
+	if _, err := LoadPiProvider(dir, "nope"); err == nil {
+		t.Fatal("unknown provider")
+	}
+	for raw, want := range map[string]string{"": "", "lit": "lit", "$$x": "$x", "$!x": "!x"} {
+		if k, err := (PiProvider{APIKey: raw}).ResolveKey(); err != nil || k != want {
+			t.Errorf("%q: %q %v", raw, k, err)
+		}
+	}
+	if _, err := (PiProvider{APIKey: "!cat key"}).ResolveKey(); err == nil {
+		t.Fatal("commands must be refused")
+	}
+}

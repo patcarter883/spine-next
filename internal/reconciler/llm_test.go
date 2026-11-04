@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
+	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 )
 
@@ -92,5 +93,86 @@ func TestLLMSupervisorErrors(t *testing.T) {
 		if _, err := s.Decide(context.Background(), obs()); err == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+}
+
+func providerSupervisor(t *testing.T, status int, resp string) (*LLMSupervisor, *[]byte, *http.Header) {
+	var last []byte
+	hdr := &http.Header{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		last, _ = io.ReadAll(r.Body)
+		*hdr = r.Header.Clone()
+		w.WriteHeader(status)
+		io.WriteString(w, resp)
+	}))
+	t.Cleanup(srv.Close)
+	return &LLMSupervisor{Provider: "local", Model: "m", LoadProvider: func() (agent.PiProvider, error) {
+		return agent.PiProvider{Name: "local", BaseURL: srv.URL + "/v1/", API: agent.PiAPIOpenAI, APIKey: "k"}, nil
+	}}, &last, hdr
+}
+
+func openAIReply(content, finish string) string {
+	b, _ := json.Marshal(map[string]any{"choices": []map[string]any{{"finish_reason": finish, "message": map[string]any{"content": content}}}})
+	return string(b)
+}
+
+func TestLLMSupervisorProvider(t *testing.T) {
+	s, last, hdr := providerSupervisor(t, 200, openAIReply(`{"action":"RunWorker","reason":"NoProgress","hint":"h","focus":["fp1","bogus"]}`, "stop"))
+	if s.Name() != "llm:local/m" {
+		t.Fatal(s.Name())
+	}
+	d, err := s.Decide(context.Background(), obs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Action != api.ActRunWorker || len(d.Focus) != 1 || hdr.Get("Authorization") != "Bearer k" {
+		t.Fatalf("%+v %v", d, hdr)
+	}
+	var req struct {
+		Model          string
+		ResponseFormat struct {
+			JSONSchema struct {
+				Schema struct {
+					Properties struct {
+						Action struct{ Enum []string }
+					}
+				}
+			} `json:"json_schema"`
+		} `json:"response_format"`
+	}
+	if err := json.Unmarshal(*last, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "m" || len(req.ResponseFormat.JSONSchema.Schema.Properties.Action.Enum) != len(obs().Legal) {
+		t.Fatalf("request: %s", *last)
+	}
+}
+
+func TestLLMSupervisorProviderFailures(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		resp   string
+		want   string
+	}{
+		"http":      {500, "boom", "HTTP 500"},
+		"bad json":  {200, "<html>", "bad response"},
+		"no choice": {200, `{"choices":[]}`, "no choices"},
+		"truncated": {200, openAIReply(`{"action":`, "length"), "finish reason"},
+		"not json":  {200, openAIReply("Escalate it", "stop"), "decision schema"},
+	} {
+		s, _, _ := providerSupervisor(t, tc.status, tc.resp)
+		if _, err := s.Decide(context.Background(), obs()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	s, _, _ := providerSupervisor(t, 200, "")
+	s.LoadProvider = func() (agent.PiProvider, error) {
+		return agent.PiProvider{Name: "local", BaseURL: "http://127.0.0.1:1", APIKey: "!touch /tmp/pwned"}, nil
+	}
+	if _, err := s.Decide(context.Background(), obs()); err == nil || !strings.Contains(err.Error(), "won't run") {
+		t.Errorf("command key: %v", err)
 	}
 }

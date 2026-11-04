@@ -283,3 +283,27 @@ func TestPiRoles(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigListsSupervisorProviders(t *testing.T) {
+	srv, _, dir := piEnv(t, nil)
+	const secret = "sk-very-secret"
+	os.WriteFile(filepath.Join(dir, "models.json"), []byte(`{"providers":{"local":{"baseUrl":"http://h/v1","api":"openai-completions","apiKey":"`+secret+`","models":[{"id":"m"}]},
+	 "gw":{"baseUrl":"http://g","api":"anthropic-messages","models":[{"id":"x"}]}}}`), 0o600)
+	r, _ := http.Get(srv.URL + "/api/repos/alpha/config")
+	var buf bytes.Buffer
+	buf.ReadFrom(r.Body)
+	if strings.Contains(buf.String(), secret) {
+		t.Fatalf("config leaks the key: %s", buf.String())
+	}
+	var c struct {
+		Providers []piProvider `json:"supervisor_providers"`
+	}
+	json.Unmarshal(buf.Bytes(), &c)
+	if len(c.Providers) != 1 || c.Providers[0].Name != "local" || c.Providers[0].Models[0].ID != "m" {
+		t.Fatalf("%+v", c.Providers)
+	}
+	local, model := "local", "m"
+	if code, j := piCall(t, srv, "PUT", "/api/repos/alpha/config", map[string]any{"settings": config.Settings{SupervisorProvider: &local, SupervisorModel: &model}}); code != 200 || j["changed"] != true {
+		t.Fatalf("%d %v", code, j)
+	}
+}

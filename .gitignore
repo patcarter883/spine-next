@@ -1,3 +1,4 @@
 /spine
 *.test
 *.out
+.spine/*.bak

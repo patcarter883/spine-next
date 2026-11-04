@@ -972,7 +972,7 @@ async function viewSettings() {
 }
 async function settingsConfig(rn) {
   const c = await get(`/api/repos/${enc(rn)}/config`).catch(e => ({ error: e.message }));
-  const s = c.settings || {}, ro = can("admin") ? "" : "disabled";
+  const s = c.settings || {}, ro = can("admin") ? "" : "disabled", svProviders = c.supervisor_providers || [];
   $("#cfg").className = "";
   $("#cfg").innerHTML = `${c.error ? `<p class="fail">${esc(c.error)}</p>` : ""}<p class="hint"><code>${esc(c.path || "")}</code>${c.exists ? "" : " (absent: built-in defaults)"} · ${c.restart ? "saving restarts this repository's controller" : "restart <code>spine controller</code> to apply changes"}</p>
    <form class="f" id="cf"><div class="row3"><label>Default agent<select name="agent" ${ro}>${(c.adapters || []).map(a => `<option value="${esc(a.name)}" ${a.name === s.agent ? "selected" : ""}>${esc(a.label)}</option>`).join("")}</select></label>
@@ -981,13 +981,22 @@ async function settingsConfig(rn) {
     <label>Token budget per task<input name="max_tokens" type="number" min="0" value="${s.max_tokens || 0}" ${ro}></label></div>
     <div class="row3"><label>Run timeout<input name="per_run_timeout" value="${esc(s.per_run_timeout || "")}" ${ro}></label><label>Wall clock<input name="max_wall_clock" value="${esc(s.max_wall_clock || "")}" ${ro}></label>
     <label>Supervisor<select name="supervisor" ${ro}>${["rules", "llm"].map(x => `<option ${x === s.supervisor ? "selected" : ""}>${x}</option>`).join("")}</select></label></div>
+    <div id="svLLM"><div class="row"><label>Supervisor LLM provider<select name="sv_provider" ${ro}><option value="">Anthropic API</option>${svProviders.map(p => `<option value="${esc(p.name)}" ${p.name === s.supervisor_provider ? "selected" : ""}>${esc(p.name)} (${esc(p.base_url)})</option>`).join("")}${s.supervisor_provider && !svProviders.some(p => p.name === s.supervisor_provider) ? `<option value="${esc(s.supervisor_provider)}" selected>${esc(s.supervisor_provider)} (not in models.json)</option>` : ""}</select></label>
+     <label>Supervisor LLM model<input name="sv_model" list="svModels" value="${esc(s.supervisor_model || "")}" ${ro}><datalist id="svModels"></datalist></label></div>
+     <p class="hint">Decides what to do after a failed round. It only gets a task summary and has no tools; if the call fails, the rules decide. Other providers come from Pi's <code>models.json</code> (Settings, Pi agent) and must use <code>openai-completions</code>.</p></div>
     ${ro ? "" : `<div class="actions"><button class="btn primary">Save settings</button><button type="button" class="btn" id="rawBtn">Edit YAML…</button></div>`}<div class="err" id="cfErr"></div></form>
     <details><summary class="hint">Agents</summary><table>${(c.adapters || []).map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.label)}</td><td class="mono">${esc(a.command)}</td><td class="warn">${esc(a.warning || "")}</td></tr>`).join("")}</table></details>`;
   const f = $("#cf");
+  const svSync = () => {
+    $("#svLLM").hidden = f.supervisor.value !== "llm";
+    f.sv_model.placeholder = f.sv_provider.value ? "required" : "claude-opus-5-5";
+    $("#svModels").innerHTML = (svProviders.find(p => p.name === f.sv_provider.value)?.models || []).map(m => `<option value="${esc(m.id)}">`).join("");
+  };
+  svSync(); f.supervisor.onchange = svSync; f.sv_provider.onchange = () => { f.sv_model.value = ""; svSync() };
   f.onsubmit = async e => {
     e.preventDefault(); $("#cfErr").textContent = "";
     const settings = { agent: f.agent.value, parallel: +f.parallel.value, base: f.base.value, max_attempts: +f.max_attempts.value, max_patch_rounds: +f.max_patch_rounds.value,
-      max_tokens: +f.max_tokens.value, per_run_timeout: f.per_run_timeout.value, max_wall_clock: f.max_wall_clock.value, supervisor: f.supervisor.value };
+      max_tokens: +f.max_tokens.value, per_run_timeout: f.per_run_timeout.value, max_wall_clock: f.max_wall_clock.value, supervisor: f.supervisor.value, supervisor_provider: f.sv_provider.value, supervisor_model: f.sv_model.value };
     try { const j = await send("PUT", `/api/repos/${enc(rn)}/config`, { settings }); savedToast(j); settingsConfig(rn) } catch (x) { $("#cfErr").textContent = x.message }
   };
   const rb = $("#rawBtn");

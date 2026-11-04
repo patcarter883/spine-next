@@ -20,6 +20,9 @@ type Settings struct {
 	MaxWallClock   *string `json:"max_wall_clock,omitempty"`
 	PerRunTimeout  *string `json:"per_run_timeout,omitempty"`
 	Supervisor     *string `json:"supervisor,omitempty"` // rules | llm
+	// Empty removes the key: the Anthropic API and its default model.
+	SupervisorProvider *string `json:"supervisor_provider,omitempty"`
+	SupervisorModel    *string `json:"supervisor_model,omitempty"`
 }
 
 // ApplySettings sets fields in a config file's YAML, keeping comments and
@@ -56,6 +59,15 @@ func ApplySettings(src []byte, s Settings) ([]byte, error) {
 	}
 	if s.Supervisor != nil {
 		set("supervisor.type", *s.Supervisor)
+	}
+	for key, v := range map[string]*string{"provider": s.SupervisorProvider, "model": s.SupervisorModel} {
+		switch {
+		case v == nil:
+		case *v == "":
+			deletePath(root, "supervisor", key)
+		default:
+			setPath(root, *v, "supervisor", key)
+		}
 	}
 	return encodeDoc(doc)
 }

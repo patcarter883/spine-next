@@ -34,6 +34,21 @@ func Agent(ctx context.Context, repoDir string, probe bool) []Finding {
 		return out
 	}
 	add(OK, "config", "agent %q, %d parallel, base %s", cfg.Agent, cfg.Parallel, cfg.Base)
+	if sv := cfg.Supervisor; sv.Type == "llm" {
+		if sv.Provider != "" {
+			p, err := agent.LoadPiProvider(agent.PiAgentDir(cfg.PiAdapter()), sv.Provider)
+			if err == nil {
+				_, err = p.ResolveKey()
+			}
+			if err != nil {
+				add(Warn, "supervisor", "%v: decisions will fall back to the rules", err)
+			} else {
+				add(OK, "supervisor", "llm %s/%s at %s", sv.Provider, sv.Model, p.BaseURL)
+			}
+		} else if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("ANTHROPIC_AUTH_TOKEN") == "" {
+			add(Warn, "supervisor", "llm uses the Anthropic API, but neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set: without an `ant auth login` profile, decisions fall back to the rules")
+		}
+	}
 	if !ast.Available() {
 		add(Warn, "tree-sitter", "built without CGO: ts.* gates are unavailable")
 	}

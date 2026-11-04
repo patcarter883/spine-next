@@ -103,6 +103,11 @@ func Open(ctx context.Context, repo string, o Options) (*App, error) {
 		// `ant auth login` profile, ...), resolved by the SDK.
 		sup = &reconciler.LLMSupervisor{Client: anthropic.NewClient(), Model: a.Config.Supervisor.Model,
 			Effort: a.Config.Supervisor.Effort, Timeout: a.Config.Supervisor.Timeout}
+		if name := a.Config.Supervisor.Provider; name != "" {
+			dir := agent.PiAgentDir(a.Config.PiAdapter())
+			sup.(*reconciler.LLMSupervisor).Provider = name
+			sup.(*reconciler.LLMSupervisor).LoadProvider = func() (agent.PiProvider, error) { return agent.LoadPiProvider(dir, name) }
+		}
 	}
 	a.Controller = reconciler.New(reconciler.Deps{Store: st, WT: a.WT, Gate: a.Gate, Runner: a.Runner, Config: a.Config,
 		Supervisor: sup, Logf: o.Logf, Workers: o.Workers, ParseAvailable: ast.Available(),

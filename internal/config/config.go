@@ -48,10 +48,13 @@ type Context struct {
 
 // Supervisor selects how failed rounds are decided (RFC §3.5).
 type Supervisor struct {
-	Type    string        // "rules" (default) or "llm"
-	Model   string        // llm: default claude-opus-5-5
-	Effort  string        // llm: low|medium|high|xhigh|max (default medium)
-	Timeout time.Duration // llm: per decision (default 2m)
+	Type string // "rules" (default) or "llm"
+	// Provider names a provider in Pi's models.json to ask instead of the
+	// Anthropic API (llm; requires Model).
+	Provider string
+	Model    string        // llm: default claude-opus-5-5
+	Effort   string        // llm: low|medium|high|xhigh|max (default medium)
+	Timeout  time.Duration // llm: per decision (default 2m)
 }
 
 type rawAdapter struct {
@@ -102,10 +105,11 @@ type raw struct {
 		Experiment    float64 `yaml:"experiment"`
 	} `yaml:"context"`
 	Supervisor struct {
-		Type    string `yaml:"type"`
-		Model   string `yaml:"model"`
-		Effort  string `yaml:"effort"`
-		Timeout string `yaml:"timeout"`
+		Type     string `yaml:"type"`
+		Provider string `yaml:"provider"`
+		Model    string `yaml:"model"`
+		Effort   string `yaml:"effort"`
+		Timeout  string `yaml:"timeout"`
 	} `yaml:"supervisor"`
 }
 
@@ -273,7 +277,10 @@ func Parse(b []byte) (Config, error) {
 	case "", "rules":
 		c.Supervisor = Supervisor{Type: "rules"}
 	case "llm":
-		c.Supervisor = Supervisor{Type: "llm", Model: sv.Model, Effort: sv.Effort}
+		c.Supervisor = Supervisor{Type: "llm", Provider: sv.Provider, Model: sv.Model, Effort: sv.Effort}
+		if sv.Provider != "" && sv.Model == "" {
+			return Config{}, fmt.Errorf("config: supervisor.provider %q needs supervisor.model", sv.Provider)
+		}
 		switch sv.Effort {
 		case "", "low", "medium", "high", "xhigh", "max":
 		default:
@@ -373,6 +380,18 @@ func (c Config) NewSpec(in TaskInput) (api.Spec, error) {
 	spec.CreatedBy = in.CreatedBy
 	spec.Escalation.RequireApprovalBeforeMerge = in.RequireApproval
 	return spec, api.ValidateSpec(spec)
+}
+
+// PiAdapter is the adapter Pi settings apply to: the default agent if it is
+// a Pi one, else the one named pi.
+func (c Config) PiAdapter() agent.Adapter {
+	if a := c.Adapters[c.Agent]; a.Protocol == "pi-rpc" {
+		return a
+	}
+	if a, ok := c.Adapters["pi"]; ok && a.Protocol == "pi-rpc" {
+		return a
+	}
+	return agent.PiAdapter()
 }
 
 // AdapterNames lists configured agent adapters, sorted.

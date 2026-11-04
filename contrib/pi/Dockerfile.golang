@@ -1,6 +1,6 @@
 # Pi worker image with Go, for repositories whose agents build and test Go.
 # Build the base image first (see Dockerfile, or Settings, Pi agent), then:
-#   docker build -t spine-pi-go:1.5.0 -f contrib/pi/Dockerfile.go contrib/pi
+#   docker build -t spine-pi-go:1.5.0 -f contrib/pi/Dockerfile.golang contrib/pi
 # and set the adapter's container image to spine-pi-go:1.5.0.
 ARG PI_VERSION=1.5.0
 FROM spine-pi:${PI_VERSION}

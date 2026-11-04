@@ -1,0 +1,1156 @@
+<title>Local models for Spine</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f7f5;
+  --surface: #ffffff;
+  --surface-2: #eef0ec;
+  --ink: #1a1e21;
+  --ink-2: #4a5257;
+  --ink-3: #6c757b;
+  --rule: #d9ddd8;
+  --rule-strong: #b9c0bb;
+  --accent: #1d5b74;
+  --accent-soft: #e2eef2;
+  --code-bg: #eef1f0;
+  --code-ink: #1f2a30;
+  --chip-unv-bg: #fbecc7;
+  --chip-unv-ink: #6b4a00;
+  --chip-cmp-bg: #dde9f6;
+  --chip-cmp-ink: #1c4672;
+  --chip-ven-bg: #e7e5df;
+  --chip-ven-ink: #4b463b;
+  --chip-ind-bg: #d9f0e1;
+  --chip-ind-ink: #1d5b34;
+  --warn-bg: #fdf4e3;
+  --warn-rule: #e3b75a;
+  --ok-rule: #5a9e74;
+  --cell-none: #9aa2a7;
+  --cell-pick-bg: #e2eef2;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14181a;
+    --surface: #1b2023;
+    --surface-2: #222a2d;
+    --ink: #e5e8e6;
+    --ink-2: #b3bbbe;
+    --ink-3: #8d979b;
+    --rule: #2f383c;
+    --rule-strong: #46525a;
+    --accent: #7cc0d8;
+    --accent-soft: #1c3440;
+    --code-bg: #1f2629;
+    --code-ink: #dde4e6;
+    --chip-unv-bg: #4a3a10;
+    --chip-unv-ink: #f6d68a;
+    --chip-cmp-bg: #1e3550;
+    --chip-cmp-ink: #a9cbf0;
+    --chip-ven-bg: #35332d;
+    --chip-ven-ink: #d6d1c4;
+    --chip-ind-bg: #1b3d29;
+    --chip-ind-ink: #9fdcb4;
+    --warn-bg: #2d2617;
+    --warn-rule: #b48a34;
+    --ok-rule: #4f8f67;
+    --cell-none: #5f696e;
+    --cell-pick-bg: #1c3440;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14181a;
+  --surface: #1b2023;
+  --surface-2: #222a2d;
+  --ink: #e5e8e6;
+  --ink-2: #b3bbbe;
+  --ink-3: #8d979b;
+  --rule: #2f383c;
+  --rule-strong: #46525a;
+  --accent: #7cc0d8;
+  --accent-soft: #1c3440;
+  --code-bg: #1f2629;
+  --code-ink: #dde4e6;
+  --chip-unv-bg: #4a3a10;
+  --chip-unv-ink: #f6d68a;
+  --chip-cmp-bg: #1e3550;
+  --chip-cmp-ink: #a9cbf0;
+  --chip-ven-bg: #35332d;
+  --chip-ven-ink: #d6d1c4;
+  --chip-ind-bg: #1b3d29;
+  --chip-ind-ink: #9fdcb4;
+  --warn-bg: #2d2617;
+  --warn-rule: #b48a34;
+  --ok-rule: #4f8f67;
+  --cell-none: #5f696e;
+  --cell-pick-bg: #1c3440;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+h1, h2, h3, h4 {
+  font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+  text-wrap: balance;
+  line-height: 1.2;
+  color: var(--ink);
+}
+h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); margin: 0 0 8px; font-weight: 700; }
+h2 { font-size: clamp(1.4rem, 3vw, 1.8rem); margin: 56px 0 12px; padding-top: 14px; border-top: 2px solid var(--ink); font-weight: 600; }
+h3 { font-size: 1.2rem; margin: 32px 0 8px; font-weight: 600; }
+h4 { font-size: 1rem; margin: 20px 0 6px; font-weight: 600; font-family: "Public Sans", "Helvetica Neue", Arial, sans-serif; }
+p, li { max-width: 68ch; }
+p { margin: 0 0 12px; }
+ul, ol { padding-left: 22px; margin: 0 0 14px; }
+li { margin: 3px 0; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+code, pre, kbd { font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+code { font-size: 0.86em; background: var(--code-bg); color: var(--code-ink); padding: 1px 4px; border-radius: 3px; overflow-wrap: anywhere; }
+.meta { color: var(--ink-2); font-size: 0.95rem; margin-bottom: 20px; }
+.lede { font-size: 1.08rem; color: var(--ink); max-width: 72ch; }
+.small { font-size: 0.88rem; color: var(--ink-2); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 18px 0 8px; padding: 12px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); font-size: 0.92rem; }
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+.chip {
+  display: inline-block;
+  font-family: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  padding: 1px 7px;
+  border-radius: 10px;
+  vertical-align: 1px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.chip.unv { background: var(--chip-unv-bg); color: var(--chip-unv-ink); }
+.chip.cmp { background: var(--chip-cmp-bg); color: var(--chip-cmp-ink); }
+.chip.ven { background: var(--chip-ven-bg); color: var(--chip-ven-ink); }
+.chip.ind { background: var(--chip-ind-bg); color: var(--chip-ind-ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 0.88rem; color: var(--ink-2); margin: 8px 0 0; }
+.legend span { min-width: 0; }
+
+.rec {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--accent);
+  padding: 18px 20px 8px;
+  margin: 24px 0;
+}
+.rec h2 { margin-top: 0; border-top: 0; padding-top: 0; }
+.callout {
+  background: var(--warn-bg);
+  border-left: 3px solid var(--warn-rule);
+  padding: 10px 14px;
+  margin: 14px 0;
+  max-width: 80ch;
+}
+.callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 10px 0 18px; border: 1px solid var(--rule); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+th { background: var(--surface-2); font-weight: 600; color: var(--ink); white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.nums td { font-variant-numeric: tabular-nums; }
+td.none { color: var(--cell-none); text-align: right; }
+td.pick { background: var(--cell-pick-bg); font-weight: 600; }
+tr.group td { background: var(--surface-2); font-weight: 600; border-top: 1px solid var(--rule-strong); }
+tr.group td .small { font-weight: 400; }
+td .sub { display: block; color: var(--ink-3); font-size: 0.82rem; }
+
+.verdicts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; margin: 14px 0; }
+.verdict { background: var(--surface); border: 1px solid var(--rule); border-top: 3px solid var(--ok-rule); padding: 14px 16px; min-width: 0; }
+.verdict.corrected { border-top-color: var(--warn-rule); }
+.verdict h3 { margin: 0 0 4px; font-size: 1.05rem; }
+.verdict .tag { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); margin-bottom: 6px; }
+.verdict p { font-size: 0.93rem; }
+
+.tier { background: var(--surface); border: 1px solid var(--rule); margin: 22px 0; }
+.tier > summary { cursor: pointer; padding: 12px 16px; font-family: "Source Serif 4", Georgia, serif; font-weight: 600; font-size: 1.15rem; list-style-position: inside; border-bottom: 1px solid var(--rule); }
+.tier .tier-body { padding: 6px 16px 14px; min-width: 0; }
+.tier .tier-body > * { min-width: 0; }
+
+.codewrap { position: relative; margin: 8px 0 16px; min-width: 0; }
+.codewrap .label { font-size: 0.78rem; color: var(--ink-2); font-weight: 600; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+pre {
+  margin: 0;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  white-space: pre;
+}
+pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.copy {
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.copy:hover { background: var(--accent-soft); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0 18px; }
+.two > * { min-width: 0; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 0.92rem; margin: 8px 0 14px; max-width: 80ch; }
+.kv > * { min-width: 0; }
+.kv dt { font-weight: 600; color: var(--ink-2); }
+.kv dd { margin: 0; }
+ol.sources li, ul.sources li { font-size: 0.88rem; max-width: none; overflow-wrap: anywhere; }
+.footer { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 0.85rem; color: var(--ink-3); }
+@media (max-width: 560px) {
+  .kv { grid-template-columns: 1fr; }
+  .kv dt { margin-top: 6px; }
+  th, td { padding: 6px 8px; }
+}
+</style>
+
+<div class="page">
+
+<header>
+<h1>Local models for Spine</h1>
+<div class="meta">Research report for running Spine's Pi worker (<code>pi-rpc</code>, Pi 1.5.0) and the LLM planner on local GPUs. Compiled 2026-11-04 from the research notes in <code>research_notes/Local models for spine Pi/</code> and a read of <code>spine-next</code> on <code>main</code>. No repo code was changed.</div>
+<div class="legend">
+<span><span class="chip unv">unverified</span> no primary source, or an assumption to check</span>
+<span><span class="chip cmp">computed</span> my arithmetic from config values (memory_calc.md)</span>
+<span><span class="chip ven">vendor-reported</span> number published by the model maker</span>
+<span><span class="chip ind">independent</span> third-party leaderboard or paper</span>
+</div>
+<nav class="toc" aria-label="Contents">
+<a href="#rec">Recommendation</a>
+<a href="#doubts">Four doubts</a>
+<a href="#s1">1. Models</a>
+<a href="#s2">2. Memory</a>
+<a href="#s3">3. Tool calling and Pi config</a>
+<a href="#s4">4. Benchmarks</a>
+<a href="#s5">5. Fit to Spine</a>
+<a href="#s6">6. Bake-off and Quality/Costs</a>
+<a href="#unverified">Unverified</a>
+<a href="#sources">Sources</a>
+</nav>
+</header>
+
+<section class="rec" id="rec">
+<h2>Recommendation</h2>
+<p class="lede">For the 2&times;16&nbsp;GB target, run <strong>Qwen3.8-27B at 4-bit</strong> (<a href="https://huggingface.co/RedHatAI/Qwen3.8-27B-INT4">RedHatAI/Qwen3.8-27B-INT4</a>) on <strong>vLLM with tensor parallel 2</strong>, two Pi agents at 64K context, and point the LLM planner at the same server through <code>/v1/messages</code>. Keep <strong>Qwen3.6-35B-A3B Q4 on llama.cpp</strong> as the fast alternative and settle between them with the bake-off in section 6. Worker thinking stays off. The rule supervisor stays the default anywhere the planner would have to go through llama-server, because llama-server ignores <code>output_config</code>.</p>
+
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Tier</th><th>Worker (engine)</th><th class="num">Agents @ ctx</th><th>Planner</th><th>Bake-off alternative</th></tr></thead>
+<tbody>
+<tr><td><strong>16 GB</strong><span class="sub">try the pipeline only</span></td><td>gpt-oss-20b MXFP4 GGUF (ggml-org), llama-server, reasoning low</td><td class="num">2 @ 32K <span class="chip cmp">computed</span></td><td>Rule supervisor</td><td>none that fits usefully</td></tr>
+<tr><td><strong>24 GB</strong></td><td>Qwen3.8-27B UD-Q4_K_XL, llama-server, thinking off</td><td class="num">1 @ 64K (2 @ 32K) <span class="chip cmp">computed</span></td><td>Rule supervisor</td><td>gpt-oss-20b GGUF, 10 @ 64K</td></tr>
+<tr><td class="pick"><strong>32 GB = 2&times;16 TP</strong><span class="sub">user's target</span></td><td class="pick">Qwen3.8-27B INT4 (RedHatAI), vLLM <code>-tp 2</code>, thinking off</td><td class="num pick">2 @ 64K <span class="chip cmp">computed</span></td><td class="pick">LLM supervisor on the same vLLM via <code>/v1/messages</code> (vLLM &ge;0.23.0), thinking on</td><td class="pick">Qwen3.6-35B-A3B UD-Q4_K_XL, llama.cpp, 3 @ 64K</td></tr>
+<tr><td><strong>48 GB</strong></td><td>Qwen3.8-27B-FP8, vLLM</td><td class="num">4 @ 64K (5 fit) <span class="chip cmp">computed</span></td><td>Same server</td><td>Qwen3.6-35B-A3B-FP8, 7 @ 64K</td></tr>
+<tr><td><strong>64 GB</strong></td><td>Qwen3.8-27B-FP8, vLLM</td><td class="num">8 @ 64K (11 fit) <span class="chip cmp">computed</span></td><td>Same server</td><td>Qwen3-Coder-Next AWQ (cyankiwi), 10 @ 64K</td></tr>
+</tbody>
+</table>
+</div>
+
+<h4>Why these picks</h4>
+<ul>
+<li><strong>Dense 27B over the MoE models where it fits.</strong> On the vendor's own minimal scaffolds, Qwen3.6-27B scores SWE-bench Verified 77.2 and Terminal-Bench 2.0 59.3, against 73.4 / 51.5 for Qwen3.6-35B-A3B and about 71 / 36.2 for Qwen3-Coder-Next <span class="chip ven">vendor-reported</span>. Qwen3.8-27B reports further gains over 3.6-27B (SWE-bench Pro 61.7 vs 53.5) <span class="chip ven">vendor-reported</span>. Sources: <a href="https://huggingface.co/Qwen/Qwen3.6-27B">3.6-27B card</a>, <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B">3.6-35B-A3B card</a>, <a href="https://arxiv.org/html/2603.00729">Coder-Next tech report</a>, <a href="https://huggingface.co/Qwen/Qwen3.8-27B">3.8-27B card</a>.</li>
+<li><strong>The MoE alternative is about speed.</strong> Qwen3.6-35B-A3B has 3B active parameters, so it decodes much faster than a dense 27B and fits 3 sessions at 64K on 2&times;16 GB. The only independent Pi-based number is roughly half the vendor TB2 score (23.8% mean with little-coder) <span class="chip ind">independent</span>, which is why the bake-off decides.</li>
+<li><strong>gpt-oss-20b is weak at agentic terminal work.</strong> It scores 3.1% on Terminal-Bench 2.0 with Terminus-2 (<a href="https://arxiv.org/html/2602.21193">arXiv 2602.21193</a>) <span class="chip ind">independent</span>. It is in the plan only because it is the one model that leaves room for 2 sessions on 16 GB.</li>
+<li><strong>Planner on the worker's server</strong> works only on vLLM &ge;0.23.0 or SGLang &ge;0.5.14, which map <code>output_config.format</code> to JSON-schema decoding (<a href="https://docs.vllm.ai/en/latest/features/tool_calling.html">vLLM</a> PR #42396, SGLang PR #25876). llama-server drops <code>output_config</code> (<a href="https://github.com/ggml-org/llama.cpp/pull/17570">PR #17570</a> converter), so the workaround there needs a Spine code change.</li>
+</ul>
+</section>
+
+<section id="doubts">
+<h2>Verdicts on the four doubts</h2>
+<p>These were raised in an earlier review. Two hold, two needed correction.</p>
+<div class="verdicts">
+<article class="verdict">
+<div class="tag">1 &middot; Confirmed</div>
+<h3>gpt-oss-20b size and reasoning</h3>
+<p>MoE with 20.9B total and 3.6B active (model card Table 1). The native MXFP4 checkpoint is 13.76 GB (12.8 GiB). Every GGUF quant lands at about 11.5&ndash;12.1 GB because the MXFP4 expert tensors are kept. It is a reasoning model that must use the harmony format, and reasoning cannot be turned off: low is the minimum.</p>
+<p class="small">Sources: <a href="https://huggingface.co/openai/gpt-oss-20b">HF card</a>, <a href="https://arxiv.org/html/2508.10925">model card arXiv 2508.10925</a>, <a href="https://github.com/openai/openai-cookbook/blob/main/articles/openai-harmony.md">harmony guide</a>, <a href="https://huggingface.co/unsloth/gpt-oss-20b-GGUF">unsloth GGUF</a>.</p>
+</article>
+<article class="verdict corrected">
+<div class="tag">2 &middot; Corrected</div>
+<h3>Dense 27B FP8 at 64&ndash;128K on 32 GB</h3>
+<p>Does not fit. The weights alone are 30.87 GB (<a href="https://huggingface.co/Qwen/Qwen3.8-27B-FP8">Qwen3.8-27B-FP8</a>), above the 24.94 GB usable on 2&times;16 GB and the 27.94 GB usable on a single 32 GB card <span class="chip cmp">computed</span>. With the planned 4-bit weights on 2&times;16 GB TP: <strong>INT4 (19.45 GB) gives 4 / 2 / 1 sessions at 32K / 64K / 128K</strong>; UD-Q4_K_XL GGUF (17.56 GB) gives 6 / 3 / 1, but llama.cpp splits by layer, which is not true tensor parallelism.</p>
+</article>
+<article class="verdict corrected">
+<div class="tag">3 &middot; Correct only at BF16</div>
+<h3>Qwen3-Coder-Next about 3.2 GB per 128K session</h3>
+<p>That figure is BF16 KV: 12 full-attention layers &times; 2 KV heads &times; 256 head dim &times; 2 (K+V) &times; 2 B &times; 131,072 = 3.22 GB. With FP8 KV it is <strong>1.61 GB plus about 77 MB of DeltaNet state</strong> <span class="chip cmp">computed</span>. The bigger issue is the weights: 4-bit Coder-Next is about 48&ndash;50 GB (<a href="https://huggingface.co/cyankiwi/Qwen3-Coder-Next-AWQ-4bit">AWQ 48.25 GB</a>, <a href="https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF">UD-Q4_K_XL 49.61 GB</a>), so it only fits the 64 GB tier.</p>
+</article>
+<article class="verdict corrected">
+<div class="tag">4 &middot; Corrected</div>
+<h3>Pi prompt size</h3>
+<p>It is well above 150 words. Pi 1.5.0's system prompt is about 2,284 characters, 289 words, &asymp;570 tokens. The four tool schemas add &asymp;710 tokens. With the chat-template wrapper that is <strong>&asymp;1.3&ndash;1.6K tokens before the first user message</strong>, plus any <code>AGENTS.md</code> / <code>CLAUDE.md</code> found in the worktree or its parents, added verbatim. Spine does not pass <code>--no-context-files</code>. Reconstructed from source at tag v1.5.0, not captured on the wire.</p>
+<p class="small">Source: <a href="https://github.com/earendil-works/pi">Pi v1.5.0</a> <code>packages/coding-agent/src/core/system-prompt.ts</code>, tool files under <code>core/tools/</code>.</p>
+</article>
+</div>
+</section>
+
+<section id="s1">
+<h2>1. Models, verified</h2>
+<p>Facts come from each repo's <code>config.json</code>, model card, HF API file listing and the QwenLM GitHub News section. Sizes use GB = 10<sup>9</sup> bytes.</p>
+
+<h3>Name resolution</h3>
+<ul>
+<li><strong>Qwen3.8-27B exists.</strong> <a href="https://huggingface.co/Qwen/Qwen3.8-27B">Qwen/Qwen3.8-27B</a>, HF repo created 2026-08-05, GitHub News "2026-08-14: Qwen3.8-27B is now available" (<a href="https://github.com/QwenLM/Qwen3.6">QwenLM News</a>). Same architecture and config shape as Qwen3.6-27B and Qwen3.5-27B.</li>
+<li><strong>Qwen3.6-35B-A3B exists</strong> (<a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B">card</a>, News 2026-04-16).</li>
+<li><strong>There is no Qwen3.8-35B-A3B.</strong> The full Qwen HF org listing for Feb to Nov 2026 was checked.</li>
+<li>The 3.8 family's other releases (Qwen3.8-Flash-Next at 180B total, Qwen3.8-2.4T-A95B) are not local-scale. Qwen-AgentWorld-35B-A3B simulates environments and is not a coding agent.</li>
+<li><strong>Serving support for Qwen3.8</strong> (parser names, minimum vLLM/SGLang versions) was verified only for Qwen3.5/3.6. Qwen3.8 has the same <code>qwen3_5</code> config shape, so I assume the same parsers work <span class="chip unv">unverified</span>.</li>
+</ul>
+
+<h3>Candidate models</h3>
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Model</th><th>Type</th><th class="num">Total / active</th><th>Attention</th><th class="num">Native ctx</th><th>License</th><th>Released</th><th>Thinking</th></tr></thead>
+<tbody>
+<tr><td><a href="https://huggingface.co/Qwen/Qwen3.8-27B">Qwen3.8-27B</a></td><td>Dense, VLM</td><td class="num">27.8B</td><td>16&times;(3 Gated DeltaNet &rarr; 1 Gated Attention), 64 layers</td><td class="num">262,144</td><td>Apache-2.0</td><td>2026-08-14</td><td>On by default; <code>enable_thinking:false</code> per request; <code>reasoning_effort</code> xhigh/medium/low; <code>preserve_thinking</code> default true</td></tr>
+<tr><td><a href="https://huggingface.co/Qwen/Qwen3.6-27B">Qwen3.6-27B</a></td><td>Dense, VLM</td><td class="num">27.8B</td><td>Same as 3.8</td><td class="num">262,144</td><td>Apache-2.0</td><td>2026-04-22</td><td>On by default; no <code>/think</code> soft switch</td></tr>
+<tr><td><a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B">Qwen3.6-35B-A3B</a></td><td>MoE (256 exp, 8+1)</td><td class="num">35B / 3B</td><td>10&times;(3 DeltaNet &rarr; 1 Gated Attention), 40 layers</td><td class="num">262,144</td><td>Apache-2.0</td><td>2026-04-16</td><td>As 3.6-27B</td></tr>
+<tr><td><a href="https://huggingface.co/Qwen/Qwen3-Coder-Next">Qwen3-Coder-Next</a></td><td>MoE (512 exp, 10+1)</td><td class="num">79.7B / 3B</td><td>12&times;(3 DeltaNet &rarr; 1 Gated Attention), 48 layers</td><td class="num">262,144 <span class="sub">extended ctx not stated <span class="chip unv">unverified</span></span></td><td>Apache-2.0</td><td>HF 2026-01-30 <span class="chip unv">unverified</span></td><td>Non-thinking only</td></tr>
+<tr><td><a href="https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct">Qwen3-Coder-30B-A3B</a></td><td>MoE (128 exp, 8)</td><td class="num">30.5B / 3.3B</td><td>Full GQA 32Q/4KV, 48 layers</td><td class="num">262,144</td><td>Apache-2.0</td><td>HF 2025-07-31</td><td>Non-thinking only</td></tr>
+<tr><td><a href="https://huggingface.co/Qwen/Qwen3-14B">Qwen3-14B</a></td><td>Dense</td><td class="num">14.8B</td><td>Full GQA 40Q/8KV, 40 layers</td><td class="num">32,768 <span class="sub">131,072 with YaRN</span></td><td>Apache-2.0</td><td>HF 2025-04-27</td><td>Hybrid; <code>/think</code>, <code>/no_think</code></td></tr>
+<tr><td><a href="https://huggingface.co/mistralai/Devstral-Small-2-24B-Instruct-2512">Devstral Small 2</a></td><td>Dense, vision</td><td class="num">24.0B</td><td>Full GQA 32Q/8KV, 40 layers</td><td class="num">256K</td><td>Apache-2.0</td><td>2025-12-09</td><td>None; recommended T 0.15</td></tr>
+<tr><td><a href="https://huggingface.co/openai/gpt-oss-20b">gpt-oss-20b</a></td><td>MoE (32 exp, top-4)</td><td class="num">20.9B / 3.6B</td><td>Alternating 128-token window and dense, attention sinks, 24 layers</td><td class="num">131,072</td><td>Apache-2.0</td><td>2025-08-05</td><td>Harmony; low/medium/high; cannot be off</td></tr>
+<tr><td><a href="https://huggingface.co/zai-org/GLM-4.7-Flash">GLM-4.7-Flash</a></td><td>MoE, MLA</td><td class="num">31.2B / ~3B</td><td>MLA on 47 layers</td><td class="num">202,752 (config) <span class="sub">card states none <span class="chip unv">unverified</span></span></td><td>MIT</td><td>2026-01-19</td><td>On by default; "Preserved Thinking" for agentic use</td></tr>
+<tr><td><a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16">Nemotron 3.5 Lightning</a></td><td>Mamba-2 + MoE + 6 GQA</td><td class="num">31.6B / 3B</td><td>23 Mamba, 23 MoE, 6 attention</td><td class="num">262,144 <span class="sub">1M vendor-validated</span></td><td>OpenMDW-1.1</td><td>2026-08-11</td><td>On by default; toggle</td></tr>
+<tr><td><a href="https://huggingface.co/google/gemma-4-26B-A4B-it">Gemma 4 26B-A4B</a> / <a href="https://huggingface.co/google/gemma-4-31B-it">31B</a></td><td>MoE / dense</td><td class="num">25.2B / 3.8B; 30.7B</td><td>5 sliding (1024) : 1 global, K=V</td><td class="num">256K</td><td>Apache-2.0</td><td>2026-03-31</td><td>Toggle via <code>&lt;|think|&gt;</code></td></tr>
+<tr><td><a href="https://huggingface.co/ibm-granite/granite-4.2-30b">Granite 4.2 30B</a></td><td>Dense</td><td class="num">29.3B</td><td>Full GQA 32Q/8KV, 64 layers</td><td class="num">131,072</td><td>Apache-2.0</td><td>2026-08-25</td><td>Toggle; low-effort mode</td></tr>
+</tbody>
+</table>
+</div>
+<p class="small">The short list for the 2&times;16 GB bake-off is Qwen3.8-27B, Qwen3.6-35B-A3B, gpt-oss-20b, Devstral Small 2 and GLM-4.7-Flash. Nemotron 3.5 Lightning, Gemma 4 and Granite 4.2 are newer options that the notes cover but that have no independent agentic numbers. Granite has the heaviest KV of the set (256 KiB/token at BF16).</p>
+</section>
+
+<section id="s2">
+<h2>2. Memory <span class="chip cmp">computed</span></h2>
+<p>All numbers in this section come from <code>memory_calc.md</code> (script included there). They are arithmetic from config values, not measurements.</p>
+<dl class="kv">
+<dt>Usable VRAM</dt><dd>92% of total, minus 1.5 GB runtime overhead per GPU, minus another 0.75 GB per GPU when tensor parallel (NCCL, duplicated buffers).</dd>
+<dt>KV cache</dt><dd>FP8 or Q8_0, about 1 byte per element (Q8_0 is 6% more). Only full-attention layers hold KV.</dd>
+<dt>Recurrent state</dt><dd>DeltaNet / Mamba state in fp32, fixed per session regardless of context. Exact engine layout <span class="chip unv">unverified</span>.</dd>
+<dt>Weights</dt><dd>Published file sizes (HF API). AWQ/INT4 sizes include the vision tower; <code>--language-model-only</code> would free some of it, so those rows are conservative.</dd>
+<dt>Cells</dt><dd>Concurrent sessions at 32K / 64K / 128K. A dash means the weights do not fit.</dd>
+</dl>
+
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Tier</th><th class="num">16 GB</th><th class="num">1&times;32 GB</th><th class="num">24 GB</th><th class="num">32 GB (2&times;16 TP)</th><th class="num">48 GB</th><th class="num">64 GB</th></tr></thead>
+<tbody><tr><td>Usable GB</td><td class="num">13.22</td><td class="num">27.94</td><td class="num">20.58</td><td class="num">24.94</td><td class="num">42.66</td><td class="num">57.38</td></tr></tbody>
+</table>
+</div>
+
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Model / quant (weights)</th><th class="num">16 GB</th><th class="num">1&times;32 GB</th><th class="num">24 GB</th><th class="num">2&times;16 TP</th><th class="num">48 GB</th><th class="num">64 GB</th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="7">Qwen3.8-27B (dense) <span class="small">KV/token FP8 32.0 KiB; state 154 MB; session GB 1.23 / 2.30 / 4.45</span></td></tr>
+<tr><td>FP8 (30.9 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num pick">9/5/2</td><td class="num pick">21/11/5</td></tr>
+<tr><td>Q6_K (UD) (22.0 GB)</td><td class="none">-</td><td class="num">4/2/1</td><td class="none">-</td><td class="num">2/1/0</td><td class="num">16/8/4</td><td class="num">28/15/7</td></tr>
+<tr><td>Q5_K_M (UD) (19.8 GB)</td><td class="none">-</td><td class="num">6/3/1</td><td class="num">0/0/0</td><td class="num">4/2/1</td><td class="num">18/9/5</td><td class="num">30/16/8</td></tr>
+<tr><td>UD-Q4_K_XL (17.6 GB)</td><td class="none">-</td><td class="num">8/4/2</td><td class="num pick">2/1/0</td><td class="num">6/3/1</td><td class="num">20/10/5</td><td class="num">32/17/8</td></tr>
+<tr><td>AWQ-INT4 (19.4 GB)</td><td class="none">-</td><td class="num">6/3/1</td><td class="num">0/0/0</td><td class="num pick">4/2/1</td><td class="num">18/10/5</td><td class="num">30/16/8</td></tr>
+
+<tr class="group"><td colspan="7">Qwen3.6-35B-A3B <span class="small">KV/token FP8 10.0 KiB; state 64 MB; session GB 0.40 / 0.74 / 1.41</span></td></tr>
+<tr><td>FP8 (37.5 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">13/7/3</td><td class="num">49/27/14</td></tr>
+<tr><td>Q6_K (UD) (29.3 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">33/18/9</td><td class="num">70/38/19</td></tr>
+<tr><td>Q5_K_M (UD) (26.5 GB)</td><td class="none">-</td><td class="num">3/2/1</td><td class="none">-</td><td class="none">-</td><td class="num">40/22/11</td><td class="num">77/42/21</td></tr>
+<tr><td>UD-Q4_K_XL (22.4 GB)</td><td class="none">-</td><td class="num">13/7/3</td><td class="none">-</td><td class="num">6/3/1</td><td class="num">50/27/14</td><td class="num">87/47/24</td></tr>
+<tr><td>AWQ-INT4 (25.5 GB)</td><td class="none">-</td><td class="num">6/3/1</td><td class="none">-</td><td class="none">-</td><td class="num">43/23/12</td><td class="num">79/43/22</td></tr>
+
+<tr class="group"><td colspan="7">Qwen3-Coder-Next 80B-A3B <span class="small">KV/token FP8 12.0 KiB; state 77 MB; session GB 0.48 / 0.88 / 1.69</span></td></tr>
+<tr><td>FP8 (80.4 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td></tr>
+<tr><td>Q6_K (65.6 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td></tr>
+<tr><td>Q5_K_M (56.9 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">1/0/0</td></tr>
+<tr><td>UD-Q4_K_XL (49.6 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">16/8/4</td></tr>
+<tr><td>AWQ-INT4 (48.2 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">19/10/5</td></tr>
+
+<tr class="group"><td colspan="7">gpt-oss-20b <span class="small">KV/token FP8 12.0 KiB; SWA state 2 MB; session GB 0.40 / 0.81 / 1.61</span></td></tr>
+<tr><td>MXFP4 native (13.8 GB)</td><td class="none">-</td><td class="num">35/17/8</td><td class="num">16/8/4</td><td class="num">27/13/6</td><td class="num">71/35/17</td><td class="num">107/54/27</td></tr>
+<tr><td>Q6_K (12.0 GB)</td><td class="num">2/1/0</td><td class="num">39/19/9</td><td class="num">21/10/5</td><td class="num">31/15/8</td><td class="num">75/37/18</td><td class="num">112/56/28</td></tr>
+<tr><td>Q5_K_M (11.7 GB)</td><td class="num">3/1/0</td><td class="num">40/20/10</td><td class="num">21/10/5</td><td class="num">32/16/8</td><td class="num">76/38/19</td><td class="num">112/56/28</td></tr>
+<tr><td>UD-Q4_K_XL (11.9 GB)</td><td class="num">3/1/0</td><td class="num">39/19/9</td><td class="num">21/10/5</td><td class="num">32/16/8</td><td class="num">76/38/19</td><td class="num">112/56/28</td></tr>
+
+<tr class="group"><td colspan="7">Qwen3-Coder-30B-A3B <span class="small">KV/token FP8 48.0 KiB; no state; session GB 1.61 / 3.22 / 6.44</span></td></tr>
+<tr><td>FP8 (31.2 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">7/3/1</td><td class="num">16/8/4</td></tr>
+<tr><td>Q6_K (25.1 GB)</td><td class="none">-</td><td class="num">1/0/0</td><td class="none">-</td><td class="none">-</td><td class="num">10/5/2</td><td class="num">20/10/5</td></tr>
+<tr><td>Q5_K_M (21.7 GB)</td><td class="none">-</td><td class="num">3/1/0</td><td class="none">-</td><td class="num">1/0/0</td><td class="num">12/6/3</td><td class="num">22/11/5</td></tr>
+<tr><td>UD-Q4_K_XL (17.7 GB)</td><td class="none">-</td><td class="num">6/3/1</td><td class="num">1/0/0</td><td class="num">4/2/1</td><td class="num">15/7/3</td><td class="num">24/12/6</td></tr>
+<tr><td>AWQ-INT4 (16.8 GB)</td><td class="none">-</td><td class="num">6/3/1</td><td class="num">2/1/0</td><td class="num">5/2/1</td><td class="num">16/8/4</td><td class="num">25/12/6</td></tr>
+
+<tr class="group"><td colspan="7">Qwen3-14B (dense) <span class="small">KV/token FP8 80.0 KiB; no state; session GB 2.68 / 5.37 / 10.74</span></td></tr>
+<tr><td>FP8 (16.3 GB)</td><td class="none">-</td><td class="num">4/2/1</td><td class="num">1/0/0</td><td class="num">3/1/0</td><td class="num">9/4/2</td><td class="num">15/7/3</td></tr>
+<tr><td>Q6_K (12.1 GB)</td><td class="num">0/0/0</td><td class="num">5/2/1</td><td class="num">3/1/0</td><td class="num">4/2/1</td><td class="num">11/5/2</td><td class="num">16/8/4</td></tr>
+<tr><td>Q5_K_M (10.5 GB)</td><td class="num">1/0/0</td><td class="num">6/3/1</td><td class="num">3/1/0</td><td class="num">5/2/1</td><td class="num">11/5/2</td><td class="num">17/8/4</td></tr>
+<tr><td>UD-Q4_K_XL (9.2 GB)</td><td class="num">1/0/0</td><td class="num">6/3/1</td><td class="num">4/2/1</td><td class="num">5/2/1</td><td class="num">12/6/3</td><td class="num">17/8/4</td></tr>
+<tr><td>AWQ-INT4 (10.0 GB)</td><td class="num">1/0/0</td><td class="num">6/3/1</td><td class="num">3/1/0</td><td class="num">5/2/1</td><td class="num">12/6/3</td><td class="num">17/8/4</td></tr>
+
+<tr class="group"><td colspan="7">Devstral Small 2 24B (dense) <span class="small">KV/token FP8 80.0 KiB; no state; session GB 2.68 / 5.37 / 10.74</span></td></tr>
+<tr><td>FP8 (25.8 GB)</td><td class="none">-</td><td class="num">0/0/0</td><td class="none">-</td><td class="none">-</td><td class="num">6/3/1</td><td class="num">11/5/2</td></tr>
+<tr><td>Q6_K (19.4 GB)</td><td class="none">-</td><td class="num">3/1/0</td><td class="num">0/0/0</td><td class="num">2/1/0</td><td class="num">8/4/2</td><td class="num">14/7/3</td></tr>
+<tr><td>Q5_K_M (16.8 GB)</td><td class="none">-</td><td class="num">4/2/1</td><td class="num">1/0/0</td><td class="num">3/1/0</td><td class="num">9/4/2</td><td class="num">15/7/3</td></tr>
+<tr><td>UD-Q4_K_XL (14.5 GB)</td><td class="none">-</td><td class="num">5/2/1</td><td class="num">2/1/0</td><td class="num">3/1/0</td><td class="num">10/5/2</td><td class="num">15/7/3</td></tr>
+<tr><td>AWQ-INT4 (16.1 GB)</td><td class="none">-</td><td class="num">4/2/1</td><td class="num">1/0/0</td><td class="num">3/1/0</td><td class="num">9/4/2</td><td class="num">15/7/3</td></tr>
+
+<tr class="group"><td colspan="7">GLM-4.7-Flash 31B-A3B (MLA) <span class="small">KV/token FP8 26.4 KiB; no state; session GB 0.89 / 1.77 / 3.55</span></td></tr>
+<tr><td>Q6_K (24.7 GB)</td><td class="none">-</td><td class="num">3/1/0</td><td class="none">-</td><td class="num">0/0/0</td><td class="num">20/10/5</td><td class="num">36/18/9</td></tr>
+<tr><td>Q5_K_M (21.4 GB)</td><td class="none">-</td><td class="num">7/3/1</td><td class="none">-</td><td class="num">3/1/0</td><td class="num">23/11/5</td><td class="num">40/20/10</td></tr>
+<tr><td>UD-Q4_K_XL (17.5 GB)</td><td class="none">-</td><td class="num">11/5/2</td><td class="num">3/1/0</td><td class="num">8/4/2</td><td class="num">28/14/7</td><td class="num">44/22/11</td></tr>
+
+<tr class="group"><td colspan="7">Nemotron 3.5 Lightning 30B-A3B <span class="small">KV/token FP8 3.0 KiB; state 48 MB; session GB 0.15 / 0.25 / 0.45</span></td></tr>
+<tr><td>FP8 (32.3 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">69/41/22</td><td class="num">168/100/55</td></tr>
+<tr><td>Q6_K (34.3 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">56/33/18</td><td class="num">154/92/51</td></tr>
+<tr><td>Q5_K_M (27.0 GB)</td><td class="none">-</td><td class="num">6/3/2</td><td class="none">-</td><td class="none">-</td><td class="num">105/62/34</td><td class="num">204/121/67</td></tr>
+<tr><td>UD-Q4_K_XL (25.5 GB)</td><td class="none">-</td><td class="num">16/9/5</td><td class="none">-</td><td class="none">-</td><td class="num">115/68/38</td><td class="num">214/127/70</td></tr>
+<tr><td>NVFP4 (20.4 GB)</td><td class="none">-</td><td class="num">50/30/16</td><td class="num">1/0/0</td><td class="num">30/18/10</td><td class="num">149/89/49</td><td class="num">248/148/81</td></tr>
+
+<tr class="group"><td colspan="7">Granite 4.2 30B (dense) <span class="small">KV/token FP8 128.0 KiB; no state; session GB 4.29 / 8.59 / 17.18</span></td></tr>
+<tr><td>FP8 (30.1 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">2/1/0</td><td class="num">6/3/1</td></tr>
+<tr><td>Q6_K (24.0 GB)</td><td class="none">-</td><td class="num">0/0/0</td><td class="none">-</td><td class="num">0/0/0</td><td class="num">4/2/1</td><td class="num">7/3/1</td></tr>
+<tr><td>Q5_K_M (20.8 GB)</td><td class="none">-</td><td class="num">1/0/0</td><td class="none">-</td><td class="num">0/0/0</td><td class="num">5/2/1</td><td class="num">8/4/2</td></tr>
+</tbody>
+</table>
+</div>
+<p class="small">Highlighted cells are the recommended worker per tier. The 16 GB pick, the ggml-org MXFP4 GGUF (12.11 GB), is not a row above. The same formula gives (13.22 &minus; 12.11) / 0.40 = 2 sessions at 32K <span class="chip cmp">computed</span>. The 2&times;16 column applies the tensor-parallel overhead to every engine. llama.cpp layer split has a different overhead profile, so treat its cells there as approximate.</p>
+<div class="callout">
+<p><strong>Notes that change how the numbers are used.</strong></p>
+<ul>
+<li>On the Qwen hybrids, <code>--kv-cache-dtype fp8</code> only touches the full-attention layers (one in four). The recurrent state is set by <code>--mamba-ssm-cache-dtype</code>. The table already counts only the full layers.</li>
+<li>FP8 KV on Hopper lost long-context accuracy until two-level accumulation became the default (128K NIAH 91% &rarr; 13% &rarr; 89%). Prefill can be up to ~1.6&times; slower at head_dim 256, which is the Qwen3.5/3.6/3.8 attention head size (<a href="https://vllm.ai/blog/2026-04-22-fp8-kvcache">vLLM FP8 KV blog</a>).</li>
+<li>For gpt-oss, keep the sliding-window layers native: <code>--kv-cache-dtype-skip-layers sliding_window</code> (<a href="https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache.html">quantized KV doc</a>).</li>
+<li>GLM-4.7-Flash's number assumes an MLA latent cache. A runtime that expands K/V needs 18&times; more.</li>
+</ul>
+</div>
+</section>
+
+<section id="s3">
+<h2>3. Tool calling and Pi configuration</h2>
+
+<h3>Server parsers and minimum versions</h3>
+<p>Pinned engine references from the notes: vLLM <strong>v0.33.0</strong> (main @56e993a, 2026-11-03), SGLang <strong>v0.5.23</strong> (main @a4bef20), llama.cpp master <strong>@149f564</strong> (2026-11-03).</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Model</th><th>vLLM tool / reasoning parser</th><th>vLLM min</th><th>SGLang tool / reasoning</th><th>llama.cpp</th></tr></thead>
+<tbody>
+<tr><td>Qwen3.5 / 3.6 / 3.8 (27B, 35B-A3B)</td><td><code>qwen3_coder</code> / <code>qwen3</code></td><td>3.6 cards: &ge;0.19.0 <span class="sub">Qwen3.8 assumed same <span class="chip unv">unverified</span></span></td><td><code>qwen3_coder</code> / <code>qwen3</code>, &ge;0.5.10</td><td>Works; several parser issues (below)</td></tr>
+<tr><td>Qwen3-Coder-Next</td><td><code>qwen3_coder</code> / none</td><td>0.15.0</td><td><code>qwen3_coder</code>, &ge;0.5.8</td><td>Needs build with PR #19324 (2026-02-04)</td></tr>
+<tr><td>Qwen3-Coder-30B-A3B</td><td><code>qwen3_coder</code> (<code>qwen3_xml</code> is now an alias)</td><td>0.10.0</td><td><code>qwen3_coder</code> <span class="chip unv">unverified</span> min</td><td>Generic XML parser #16932</td></tr>
+<tr><td>gpt-oss-20b</td><td><code>openai</code> / <code>openai_gptoss</code> (optional)</td><td>0.10.1</td><td><code>gpt-oss</code> / <code>gpt-oss</code> <span class="chip unv">unverified</span> min</td><td>Harmony handler, reworked by #20393 (2026-03-18)</td></tr>
+<tr><td>Devstral Small 2</td><td><code>mistral</code></td><td>"latest" <span class="chip unv">unverified</span></td><td><code>mistral</code></td><td>Needs #17945 and #18006; unsloth template fix 2025-12-13</td></tr>
+<tr><td>GLM-4.7-Flash</td><td><code>glm47</code> / <code>glm45</code></td><td>0.15.0</td><td><code>glm47</code> / <code>glm45</code>, &ge;0.5.8</td><td>Gating fix ~#18980 plus GGUF re-download <span class="chip unv">unverified</span></td></tr>
+<tr><td>Qwen3-14B</td><td><code>hermes</code> / <code>qwen3</code></td><td>0.8.5</td><td><code>qwen25</code> / <code>qwen3</code></td><td>Hermes JSON, autoparser</td></tr>
+</tbody>
+</table>
+</div>
+<p class="small">Sources: <a href="https://docs.vllm.ai/en/latest/features/tool_calling.html">vLLM tool calling</a>, <a href="https://docs.vllm.ai/en/latest/features/reasoning_outputs.html">vLLM reasoning outputs</a>, <a href="https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html">vLLM Qwen3.5/3.6 recipe</a>, <a href="https://recipes.vllm.ai/Qwen/Qwen3.6-27B">Qwen3.6-27B recipe</a>, <a href="https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html">gpt-oss recipe</a>, <a href="https://docs.sglang.io/advanced_features/tool_parser.html">SGLang tool parser</a>, model cards in section 1.</p>
+
+<h3>Known problems that matter for Pi</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Problem</th><th>Where</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Qwen3.5/3.6 tool call emitted inside <code>&lt;think&gt;</code> lands in <code>reasoning</code>; empty <code>tool_calls</code>, HTTP 200</td><td>vLLM 0.18&ndash;0.19</td><td>#39056 open; #35687 partial; engine rewrite #45413. Thinking off avoids it.</td></tr>
+<tr><td>Same in llama.cpp: tool call in thinking stops output</td><td>llama.cpp</td><td>#20837 open. Workarounds: thinking off, <code>--reasoning-format none</code>, drop DRY.</td></tr>
+<tr><td><strong>Edit-tool risk:</strong> vLLM's Qwen3 XML parser strips one leading and one trailing <code>\n</code> from each parameter value. If the model omits the wrapper newline, a real newline at the edge of <code>oldText</code> is eaten. Values are also type-coerced by schema.</td><td>vLLM (<code>vllm/parser/qwen3.py</code>)</td><td>No Qwen-specific issue found <span class="chip unv">unverified</span>. <strong>Measure in the bake-off</strong> as failed edits on whitespace-sensitive files.</td></tr>
+<tr><td>Text between <code>&lt;/think&gt;</code> and <code>&lt;tool_call&gt;</code> gives a PEG parser 500</td><td>llama.cpp</td><td>#20260 closed, not planned</td></tr>
+<tr><td>Agent stalls: EOS right after a tool call</td><td>llama.cpp XML parser</td><td>#16932 thread, unresolved</td></tr>
+<tr><td>Other Qwen3.5 reports: think tags leak (#20182), template 500 on string args (#19872), malformed JSON in file-write calls (#19382)</td><td>llama.cpp</td><td>Status <span class="chip unv">unverified</span></td></tr>
+<tr><td>gpt-oss: tool calls not streamed, only <code>tool_choice=auto</code>, usage returns zeros, multi-turn <code>response_format</code> issues</td><td>vLLM</td><td>Recipe; <a href="https://discuss.vllm.ai/t/status-of-gpt-oss/2316">discuss.vllm.ai</a></td></tr>
+<tr><td>gpt-oss: harmony tags leak with <code>--reasoning-format none</code></td><td>llama.cpp</td><td>Discussion #15341; do not use <code>none</code> for gpt-oss</td></tr>
+<tr><td>Coder-Next poor outputs on long context</td><td>llama.cpp, Ollama</td><td>#19305, fixed by #19324; re-download GGUF</td></tr>
+<tr><td>GLM-4.7-Flash looping (gating bug)</td><td>llama.cpp GGUF</td><td>Fixed; unsloth suggests DRY 1.1, min-p 0.01</td></tr>
+<tr><td>Tool-call failures under KV quantization (Coder-Next)</td><td>LM Studio / MLX</td><td>Anecdotal, not llama.cpp <span class="chip unv">unverified</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Pi 1.5.0 compat for local URLs</h3>
+<p>Pi auto-detects provider quirks by substring on <code>baseUrl</code>. Nothing matches localhost, a private IP, vLLM, SGLang or llama.cpp, so a local server gets the "real OpenAI" profile: <code>store:false</code>, the <code>developer</code> role for reasoning models, <code>max_completion_tokens</code>, and <code>thinkingFormat:"openai"</code>. Set compat explicitly. Pi's built-in llama.cpp provider sets exactly this, but Spine's <code>--no-extensions</code> disables it.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>Field (exact name)</th><th>Set to</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><code>supportsStore</code></td><td><code>false</code></td><td>Do not send <code>store</code></td></tr>
+<tr><td><code>supportsDeveloperRole</code></td><td><code>false</code></td><td>Local templates expect <code>system</code></td></tr>
+<tr><td><code>supportsReasoningEffort</code></td><td><code>false</code> for Qwen, GLM, Devstral; <code>true</code> for gpt-oss</td><td>Qwen hybrids take on/off through the chat template</td></tr>
+<tr><td><code>maxTokensField</code></td><td><code>"max_tokens"</code></td><td>Safest across servers</td></tr>
+<tr><td><code>thinkingFormat</code></td><td><code>"qwen-chat-template"</code> for Qwen hybrids (with <code>reasoning:true</code>); default <code>"openai"</code> for gpt-oss</td><td>Level off sends <code>chat_template_kwargs:{enable_thinking:false, preserve_thinking:true}</code></td></tr>
+<tr><td><code>supportsStrictMode</code></td><td><code>false</code> (the default)</td><td>Omit <code>strict</code> from tools</td></tr>
+<tr><td><code>contextWindow</code></td><td>exactly the per-slot server context</td><td>Pi sends <code>max_tokens = min(maxTokens, contextWindow &minus; context &minus; 4096)</code>; larger than the server limit and long requests are rejected</td></tr>
+<tr><td><code>maxTokens</code></td><td>8192 (16384 for gpt-oss)</td><td>Default 16384 is too large for 32K</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Thinking</h3>
+<ul>
+<li>Spine passes no <code>--thinking</code>, so a <code>reasoning:true</code> model runs at Pi's default <strong>medium</strong> unless <code>settings.json</code> or adapter args override it.</li>
+<li><code>reasoning:false</code> sends no thinking field, so a Qwen hybrid still thinks by template default. Use <code>reasoning:true</code> with <code>qwen-chat-template</code> and level <code>off</code>.</li>
+<li>Override order: <code>--thinking</code> / <code>--model p/id:level</code>, then <code>settings.json</code> <code>modelThinkingLevels["provider/id"]</code>, then <code>defaultThinkingLevel</code>, then medium.</li>
+<li><code>--thinking off</code> is a real Pi flag (<code>CA/docs/cli.md</code>), so adapter <code>args: ["--thinking", "off"]</code> works as an alternative to <code>settings.json</code>.</li>
+<li>gpt-oss: map <code>off</code> and <code>minimal</code> to <code>"low"</code> in <code>thinkingLevelMap</code>; Pi then sends <code>reasoning_effort:"low"</code>.</li>
+<li>Spine copies <code>settings.json</code> into the container's private agent dir, so <code>compaction.modelOverrides</code>, <code>modelThinkingLevels</code>, <code>defaultThinkingLevel</code> and <code>thinkingBudgets</code> reach Pi without code changes.</li>
+</ul>
+
+<h3>Compaction</h3>
+<p>Defaults are <code>reserveTokens 16384</code> and <code>keepRecentTokens 20000</code>. At 32K compaction triggers at 16,384 tokens but tries to keep 20K, so it cannot work. Per-model overrides in <code>settings.json</code>:</p>
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Context</th><th class="num">reserveTokens</th><th class="num">keepRecentTokens</th><th>Triggers at</th></tr></thead>
+<tbody>
+<tr><td>32K (32768)</td><td class="num">12288</td><td class="num">6000&ndash;8000</td><td>&asymp;20.5K; after compaction &asymp;12K</td></tr>
+<tr><td>64K (65536)</td><td class="num">16384&ndash;20480</td><td class="num">16000&ndash;20000</td><td>&asymp;45&ndash;49K</td></tr>
+</tbody>
+</table>
+</div>
+<p class="small">Spine maps a final <code>stopReason:"length"</code> to BudgetExceeded. Pi first tries one compact-and-retry, so the mapping only applies after that. Source for this subsection: Pi v1.5.0 <code>CA/src/core/settings-defaults.ts</code>, <code>compaction/compaction.ts</code>, <code>CA/docs/compaction.md</code>.</p>
+</section>
+
+<section id="s4">
+<h2>4. Benchmarks, by harness</h2>
+<p>Harness classes from the notes. <strong>Minimal</strong>: mini-swe-agent (bash only), Terminus-2 (tmux keystrokes), vendor "bash + file-edit" scaffolds, Pi core. <strong>Medium</strong>: SWE-agent. <strong>Heavy</strong>: OpenHands, Claude Code, Qwen Code, Cline, Mistral Vibe, little-coder (Pi plus about 30 extensions). Spine runs Pi with extensions off, so minimal-harness numbers are the closest proxy.</p>
+<div class="callout"><p>Reference gap: Qwen3-Coder-480B scores 69.6 with OpenHands and 55.4 on bash-only mini-swe-agent. Expect roughly 10&ndash;15 points less than vendor heavy-scaffold numbers on a minimal harness.</p></div>
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Model</th><th>Benchmark</th><th class="num">Score</th><th>Harness</th><th>Class</th><th>Kind / source</th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="6">Qwen dense 27B</td></tr>
+<tr><td>Qwen3.6-27B</td><td>SWE-bench Verified</td><td class="num">77.2</td><td>Vendor internal, bash + file-edit, 200K</td><td>minimal</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/Qwen/Qwen3.6-27B">card</a></td></tr>
+<tr><td>Qwen3.6-27B</td><td>Terminal-Bench 2.0</td><td class="num">59.3</td><td>Harbor / Terminus-2, avg of 5</td><td>minimal</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/Qwen/Qwen3.6-27B">card</a></td></tr>
+<tr><td>Qwen3.6-27B</td><td>SWE-Multi / SWE-Pro*</td><td class="num">71.3 / 53.5</td><td>Vendor internal</td><td>minimal</td><td><span class="chip ven">vendor-reported</span></td></tr>
+<tr><td>Qwen3.8-27B</td><td>SWE-bench Pro / Terminal Bench 2.1</td><td class="num">61.7 / 73.0</td><td>Not stated in notes <span class="chip unv">unverified</span></td><td>?</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/Qwen/Qwen3.8-27B">card</a> (vs 53.5 / 63.4 for 3.6-27B)</td></tr>
+<tr><td>Qwen3.5-27B</td><td>SWE-V / TB2</td><td class="num">75.0 / 41.6</td><td>Vendor internal</td><td>minimal</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/Qwen/Qwen3.5-27B">card</a></td></tr>
+<tr class="group"><td colspan="6">Qwen MoE</td></tr>
+<tr><td>Qwen3.6-35B-A3B</td><td>SWE-V / TB2</td><td class="num">73.4 / 51.5</td><td>Vendor internal / Terminus-2</td><td>minimal</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B">card</a></td></tr>
+<tr><td>Qwen3.6-35B-A3B UD-Q4_K_M</td><td>Terminal-Bench 2.0</td><td class="num">23.8 mean</td><td>little-coder (Pi + extensions), llama.cpp, 445 trials, pass@5 39.3%; README 24.6 &plusmn; 3.2</td><td>heavy</td><td><span class="chip ind">independent</span> <a href="https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard">TB2 leaderboard</a>, <a href="https://github.com/itayinbarr/little-coder">little-coder</a></td></tr>
+<tr><td>Qwen3-Coder-Next</td><td>SWE-bench Verified</td><td class="num">71.1</td><td>mini-SWE-agent, 300 turns</td><td>minimal</td><td><span class="chip ven">vendor-reported</span> (vendor-run) <a href="https://arxiv.org/html/2603.00729">arXiv 2603.00729</a></td></tr>
+<tr><td>Qwen3-Coder-Next</td><td>SWE-bench Verified</td><td class="num">70.6 / 71.3</td><td>SWE-Agent / OpenHands</td><td>medium / heavy</td><td><span class="chip ven">vendor-reported</span></td></tr>
+<tr><td>Qwen3-Coder-Next</td><td>Terminal-Bench 2.0</td><td class="num">36.2</td><td>Terminus2-json (34.2 xml)</td><td>minimal</td><td><span class="chip ven">vendor-reported</span></td></tr>
+<tr><td>Qwen3-Coder-Next</td><td>Terminal-Bench 2.0</td><td class="num">30.9 / 25.8</td><td>Claude Code / Qwen Code</td><td>heavy</td><td><span class="chip ven">vendor-reported</span></td></tr>
+<tr><td>Qwen3-Coder-30B-A3B</td><td>SWE-bench Verified</td><td class="num">51.6</td><td>OpenHands (turn budget <span class="chip unv">unverified</span>)</td><td>heavy</td><td><span class="chip ven">vendor-reported</span> submitted by Qwen/OpenHands to <a href="https://swe-bench.github.io">swebench.com</a></td></tr>
+<tr class="group"><td colspan="6">Others on the bake-off list</td></tr>
+<tr><td>Devstral Small 2</td><td>SWE-V / TB2</td><td class="num">68.0 / 22.5</td><td>Not stated <span class="chip unv">unverified</span></td><td>?</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/mistralai/Devstral-Small-2-24B-Instruct-2512">card</a></td></tr>
+<tr><td>Devstral Small 2</td><td>SWE-bench Verified</td><td class="num">56.4</td><td>mini-swe-agent 1.17.2, bash only</td><td>minimal</td><td><span class="chip ind">independent</span> <a href="https://swe-bench.github.io">swebench.com bash-only</a></td></tr>
+<tr><td>gpt-oss-20b (high)</td><td>SWE-bench Verified (n=477)</td><td class="num">60.7</td><td>OpenAI internal (low/med 37.4 / 53.2)</td><td>?</td><td><span class="chip ven">vendor-reported</span> <a href="https://arxiv.org/html/2508.10925">arXiv 2508.10925</a></td></tr>
+<tr><td>gpt-oss-20b</td><td>SWE-bench</td><td class="num">34.0</td><td>OpenHands (NVIDIA run)</td><td>heavy</td><td><span class="chip ind">independent</span> (third party) <a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16">Nemotron 3 Nano card</a></td></tr>
+<tr><td>gpt-oss-20b (high)</td><td>Terminal-Bench 2.0</td><td class="num">3.10 &plusmn; 1.5</td><td>Terminus-2</td><td>minimal</td><td><span class="chip ind">independent</span> <a href="https://arxiv.org/html/2602.21193">arXiv 2602.21193</a></td></tr>
+<tr><td>gpt-oss-20b (high)</td><td>Aider polyglot</td><td class="num">34.2</td><td>Vendor</td><td>?</td><td><span class="chip ven">vendor-reported</span></td></tr>
+<tr><td>GLM-4.7-Flash</td><td>SWE-V / &tau;&sup2;</td><td class="num">59.2 / 79.5</td><td>Scaffold not stated <span class="chip unv">unverified</span></td><td>?</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/zai-org/GLM-4.7-Flash">card</a></td></tr>
+<tr class="group"><td colspan="6">Reference only</td></tr>
+<tr><td>Qwen3-14B</td><td>BFCL V4 overall (FC)</td><td class="num">41.03</td><td>Berkeley, rank 43</td><td>n/a</td><td><span class="chip ind">independent</span> <a href="https://gorilla.cs.berkeley.edu/data_overall.csv">BFCL csv</a></td></tr>
+<tr><td>Qwen3-14B</td><td>Terminal-Bench 2.0</td><td class="num">4.04 &plusmn; 1.3</td><td>Terminus-2</td><td>minimal</td><td><span class="chip ind">independent</span> <a href="https://arxiv.org/html/2602.21193">arXiv 2602.21193</a></td></tr>
+<tr><td>Nemotron 3 Nano</td><td>SWE-Bench / BFCL v4</td><td class="num">38.8 / 53.8</td><td>OpenHands</td><td>heavy</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16">card</a></td></tr>
+<tr><td>Nemotron 3.5 Lightning</td><td>SWE-V / TB 2.1</td><td class="num">51.56 / 24.58</td><td>Not stated</td><td>?</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16">card</a></td></tr>
+<tr><td>Granite 4.2 30B</td><td>SWE-V / TB 2.1</td><td class="num">57 / 29.24</td><td>Not stated</td><td>?</td><td><span class="chip ven">vendor-reported</span> <a href="https://huggingface.co/ibm-granite/granite-4.2-30b">card</a></td></tr>
+</tbody>
+</table>
+</div>
+<p class="small">*SWE-Pro on a vendor-refined subset. Leaderboard coverage checked: swebench.com bash-only has only Devstral Small 2 from this list. The TB2 HF submissions have only little-coder runs and an RL fine-tune of gpt-oss-20b (16.9, not the base model). BFCL V4 has only Qwen3-14B. The Aider board has none of the targets.</p>
+</section>
+
+<section id="s5">
+<h2>5. Fit to Spine</h2>
+
+<h3>How Spine settings map to server capacity</h3>
+<ul>
+<li><strong><code>max_agents</code> is the binding cap.</strong> The multi-repo supervisor (<code>supervisor.yaml</code> in <code>$SPINE_HOME</code> or <code>~/.config/spine</code>) defaults to <code>max_agents: 4</code>, <code>max_gates: 2</code>. Each repo's <code>.spine/config.yaml</code> <code>parallel</code> defaults to 4. Three repos at <code>parallel: 4</code> ask for 12 runs, but only <code>max_agents</code> run at once.</li>
+<li>Set <strong><code>max_agents</code> &le; the sessions the server holds at the chosen context</strong> (section 2).</li>
+<li>Set <strong><code>--max-num-seqs</code> (vLLM) or <code>--parallel</code> (llama-server) = <code>max_agents</code></strong>, plus 1 when the planner shares the server.</li>
+<li>Over-subscription does not fail fast. Extra requests queue (or get preempted), and a long prefill behind them can trip <code>stall_timeout</code>.</li>
+<li>Per-repo <code>parallel</code> can stay at its default as long as <code>max_agents</code> is right. Lower it if one repo should not take every slot.</li>
+</ul>
+
+<h3>Guardrails</h3>
+<div class="scroll">
+<table>
+<thead><tr><th>Setting</th><th>Default</th><th>Local recommendation</th></tr></thead>
+<tbody>
+<tr><td><code>adapters.&lt;name&gt;.max_turns</code></td><td>80</td><td>Keep</td></tr>
+<tr><td><code>adapters.&lt;name&gt;.tool_timeout</code></td><td>10m (3rd timeout ends the run)</td><td>Keep</td></tr>
+<tr><td><code>budget.max_tokens</code></td><td>off (0)</td><td><strong>Set 3,000,000 as a runaway guard</strong>. Worst case is a 64K context re-sent for 80 turns &asymp; 5.2M input tokens; 3M stops a looping run well before that. Tune from bake-off token counts.</td></tr>
+<tr><td><code>adapters.&lt;name&gt;.stall_timeout</code></td><td>15m</td><td>Keep; raise to 20m for dense 27B with several agents</td></tr>
+<tr><td><code>budget.per_run_timeout</code></td><td>45m (wrap-up steer at 80%)</td><td>60m for MoE workers, 90m for dense 27B at local decode speeds</td></tr>
+<tr><td><code>budget.max_attempts</code> / <code>max_patch_rounds</code> / <code>max_wall_clock</code></td><td>2 / 3 / 4h</td><td>Keep; 4h covers 2 attempts &times; 90m</td></tr>
+<tr><td><code>supervisor.timeout</code> (LLM planner)</td><td>2m</td><td>5m with a local model and thinking on</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout"><p>The token guard only works when the server reports usage. The vLLM gpt-oss recipe says usage accounting returns zeros, so <code>budget.max_tokens</code> will not bite for gpt-oss on vLLM. Check reported <code>tokens_used</code> for each candidate during the bake-off.</p></div>
+
+<h3>Container network</h3>
+<p><code>container.network</code> defaults to <code>host</code>. That lets the worker reach the model server on <code>127.0.0.1</code>, and it also lets the worker reach every other port on the host and the LAN, including Spine's own API on <code>127.0.0.1:8765</code>. Options, all with the existing <code>network</code> setting:</p>
+<ol>
+<li><strong>User-defined Docker network (preferred).</strong> <code>docker network create spine-models</code>, run the model server as a container on it (for example named <code>llm</code>), set <code>container.network: spine-models</code> and <code>baseUrl: http://llm:8000/v1</code>. The worker sees only that network. Host-side tools that use the same <code>models.json</code> then need the server's port published too.</li>
+<li><strong>Dedicated address.</strong> Bind the server to an address on a bridge the containers use (the Docker bridge gateway, or a dummy interface), point <code>baseUrl</code> there and use that network instead of <code>host</code>.</li>
+<li><strong>Keep <code>host</code> and firewall.</strong> Add host firewall rules that limit what the container uid can reach. This is the least isolated and the easiest to get wrong.</li>
+</ol>
+
+<h3>Planner (LLM supervisor) on a local server</h3>
+<ul>
+<li>The planner is Spine's LLM supervisor: <code>supervisor: {type: llm, model, effort, timeout}</code> in <code>.spine/config.yaml</code>. The default is <code>type: rules</code>.</li>
+<li>It calls <code>/v1/messages</code> through the Go Anthropic SDK with <code>output_config.format</code> (JSON schema) and <code>effort</code>, using <code>ANTHROPIC_API_KEY</code>. To reach a local server, set <code>ANTHROPIC_BASE_URL</code> in the controller's environment. That the Go SDK honours this variable is an assumption to check <span class="chip unv">unverified</span>.</li>
+<li><strong>vLLM &ge;0.23.0</strong> (PR #42396) and <strong>SGLang &ge;0.5.14</strong> (PR #25876) map <code>output_config.format</code> to JSON-schema decoding and <code>effort</code> to <code>reasoning_effort</code>. vLLM applies the grammar after the reasoning section, so thinking can stay on.</li>
+<li><strong>llama-server ignores <code>output_config</code> and <code>effort</code>.</strong> Its documented <code>extra_params</code> object would work (<code>option.WithJSONSet("extra_params", ...)</code>), but that is a Spine code change. Keep the rule supervisor on llama.cpp tiers.</li>
+<li>Thinking on for planner requests: Qwen3.8's template thinks by default and the planner sends no <code>enable_thinking:false</code>. Whether vLLM's <code>reasoning_effort</code> reaches Qwen3.8's template effort levels is <span class="chip unv">unverified</span>.</li>
+</ul>
+
+<h3>Per-tier configuration</h3>
+<p class="small">All snippets below go with the shared rules above. Paths: Pi config in <code>~/.pi/agent/</code> (or <code>PI_CODING_AGENT_DIR</code>), copied into each container run. Repo config in <code>.spine/config.yaml</code>. Supervisor in <code>~/.config/spine/supervisor.yaml</code>. Image tag as in the README (<code>docker build -t spine-pi:1.5.0 contrib/pi</code>). Servers bind to <code>127.0.0.1</code> to fit the default <code>host</code> network; switch to one of the network options above for isolation.</p>
+
+<!-- ============ 16 GB ============ -->
+<details class="tier" open>
+<summary>16 GB: gpt-oss-20b on llama-server (pipeline trial)</summary>
+<div class="tier-body">
+<p>2 agents at 32K <span class="chip cmp">computed</span>. Expect weak results (TB2 3.1% with Terminus-2). Use this tier to prove the pipeline, not for production. Rule supervisor.</p>
+<div class="codewrap"><div class="label">llama-server (llama.cpp master @149f564 or any build with #20393)<button class="copy" type="button">Copy</button></div>
+<pre><code>llama-server -m ./gpt-oss-20b-MXFP4.gguf \
+  --alias gpt-oss-20b \
+  --jinja -ngl 99 -fa on \
+  -c 65536 --parallel 2 \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --reasoning-format auto \
+  --host 127.0.0.1 --port 8080
+# -c = 2 slots x 32768. Do not use --reasoning-format none with gpt-oss (harmony tags leak).
+# GGUF file: ggml-org gpt-oss-20b-MXFP4.gguf (12.11 GB)</code></pre></div>
+<div class="two">
+<div class="codewrap"><div class="label">~/.pi/agent/models.json<button class="copy" type="button">Copy</button></div>
+<pre><code>{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "llamacpp": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": false
+      },
+      "models": [{
+        "id": "gpt-oss-20b",
+        "reasoning": true,
+        "input": ["text"],
+        "contextWindow": 32768,
+        "maxTokens": 8192,
+        "thinkingLevelMap": { "off": "low", "minimal": "low" },
+        "compat": {
+          "thinkingFormat": "openai",
+          "supportsReasoningEffort": true
+        }
+      }]
+    }
+  }
+}</code></pre></div>
+<div class="codewrap"><div class="label">~/.pi/agent/settings.json<button class="copy" type="button">Copy</button></div>
+<pre><code>{
+  "modelThinkingLevels": { "llamacpp/gpt-oss-20b": "low" },
+  "compaction": {
+    "modelOverrides": {
+      "llamacpp/gpt-oss-20b": { "reserveTokens": 12288, "keepRecentTokens": 8000 }
+    }
+  }
+}</code></pre></div>
+</div>
+<div class="two">
+<div class="codewrap"><div class="label">.spine/config.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>agent: pi
+parallel: 2
+adapters:
+  pi:
+    protocol: pi-rpc
+    version: 1.5.0
+    model: llamacpp/gpt-oss-20b
+    args: [--no-context-files]   # optional: keeps AGENTS.md out of a 32K window
+    tool_timeout: 10m
+    max_turns: 80
+    stall_timeout: 15m
+    container:
+      image: spine-pi:1.5.0
+      network: host
+budget:
+  max_tokens: 3000000
+  per_run_timeout: 60m
+supervisor:
+  type: rules</code></pre></div>
+<div class="codewrap"><div class="label">~/.config/spine/supervisor.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>max_agents: 2
+max_gates: 2</code></pre></div>
+</div>
+<p class="small">Whether llama-server applies a per-request <code>reasoning_effort</code> to the gpt-oss template on <code>/v1/chat/completions</code> is not in the notes <span class="chip unv">unverified</span>. Check the first response's reasoning length.</p>
+</div>
+</details>
+
+<!-- ============ 24 GB ============ -->
+<details class="tier" open>
+<summary>24 GB: Qwen3.8-27B UD-Q4_K_XL on llama-server</summary>
+<div class="tier-body">
+<p>1 agent at 64K, or 2 at 32K <span class="chip cmp">computed</span>. Thinking off. Bake-off alternative: gpt-oss-20b GGUF, 10 agents at 64K. Rule supervisor.</p>
+<div class="codewrap"><div class="label">llama-server (llama.cpp master @149f564)<button class="copy" type="button">Copy</button></div>
+<pre><code>llama-server -hf unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL \
+  --alias qwen3.8-27b \
+  --jinja -ngl 99 -fa on \
+  -c 65536 --parallel 1 \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --reasoning-format deepseek \
+  --ctx-checkpoints 32 \
+  --host 127.0.0.1 --port 8080
+# Hybrid model: prompt reuse depends on context checkpoints (default 32, min step 8192).
+# For 2 agents at 32K: -c 65536 --parallel 2 and contextWindow 32768.</code></pre></div>
+<div class="two">
+<div class="codewrap"><div class="label">~/.pi/agent/models.json<button class="copy" type="button">Copy</button></div>
+<pre><code>{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "llamacpp": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": false,
+        "thinkingFormat": "qwen-chat-template"
+      },
+      "models": [{
+        "id": "qwen3.8-27b",
+        "reasoning": true,
+        "input": ["text"],
+        "contextWindow": 65536,
+        "maxTokens": 8192,
+        "thinkingLevelMap": { "minimal": null, "low": null, "high": null },
+        "samplingParamsByThinkingLevel": {
+          "off":    { "temperature": 0.7, "top_p": 0.8,  "top_k": 20, "presence_penalty": 1.5 },
+          "medium": { "temperature": 1.0, "top_p": 0.95, "top_k": 20, "presence_penalty": 0.0 }
+        }
+      }]
+    }
+  }
+}</code></pre></div>
+<div class="codewrap"><div class="label">~/.pi/agent/settings.json<button class="copy" type="button">Copy</button></div>
+<pre><code>{
+  "defaultThinkingLevel": "off",
+  "modelThinkingLevels": { "llamacpp/qwen3.8-27b": "off" },
+  "compaction": {
+    "modelOverrides": {
+      "llamacpp/qwen3.8-27b": { "reserveTokens": 16384, "keepRecentTokens": 16000 }
+    }
+  }
+}</code></pre></div>
+</div>
+<div class="two">
+<div class="codewrap"><div class="label">.spine/config.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>agent: pi
+parallel: 1
+adapters:
+  pi:
+    protocol: pi-rpc
+    version: 1.5.0
+    model: llamacpp/qwen3.8-27b
+    # args: [--thinking, off]   # alternative to settings.json
+    tool_timeout: 10m
+    max_turns: 80
+    stall_timeout: 15m
+    container:
+      image: spine-pi:1.5.0
+      network: host
+budget:
+  max_tokens: 3000000
+  per_run_timeout: 90m
+supervisor:
+  type: rules</code></pre></div>
+<div class="codewrap"><div class="label">~/.config/spine/supervisor.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>max_agents: 1
+max_gates: 2</code></pre></div>
+</div>
+<p class="small">Sampling values are from the <a href="https://huggingface.co/Qwen/Qwen3.8-27B">Qwen3.8-27B card</a> (non-thinking T 0.7 / top_p 0.8 / top_k 20 / presence 1.5). <code>samplingParamsByThinkingLevel</code> merges last and overrides named fields.</p>
+</div>
+</details>
+
+<!-- ============ 32 GB 2x16 ============ -->
+<details class="tier" open>
+<summary>32 GB = 2&times;16 GB TP: Qwen3.8-27B INT4 on vLLM (target)</summary>
+<div class="tier-body">
+<p>2 agents at 64K (<code>max_agents: 2</code>) <span class="chip cmp">computed</span>. <code>--max-num-seqs 3</code> leaves one slot for short planner requests. Memory is sized for 2 full 64K sessions, so a third long request would be queued or preempted by vLLM. The planner is the LLM supervisor on the same server with thinking on.</p>
+<div class="codewrap"><div class="label">vLLM v0.33.0 (&ge;0.23.0 needed for the planner)<button class="copy" type="button">Copy</button></div>
+<pre><code>vllm serve RedHatAI/Qwen3.8-27B-INT4 \
+  --served-model-name qwen3.8-27b \
+  -tp 2 \
+  --max-model-len 65536 \
+  --max-num-seqs 3 \
+  --gpu-memory-utilization 0.92 \
+  --kv-cache-dtype fp8 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --language-model-only \
+  --enable-prefix-caching \
+  --host 127.0.0.1 --port 8000
+# Parser names verified for Qwen3.5/3.6; Qwen3.8 assumed same (same qwen3_5 config).
+# Prefix caching on the DeltaNet hybrid uses mamba "align" mode, which the recipe calls
+# experimental. Keep it (Pi re-sends the whole history each turn); drop it if it errors.</code></pre></div>
+<div class="two">
+<div class="codewrap"><div class="label">~/.pi/agent/models.json<button class="copy" type="button">Copy</button></div>
+<pre><code>{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "vllm": {
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "maxTokensField": "max_tokens",
+        "supportsStrictMode": false,
+        "thinkingFormat": "qwen-chat-template"
+      },
+      "models": [{
+        "id": "qwen3.8-27b",
+        "reasoning": true,
+        "input": ["text"],
+        "contextWindow": 65536,
+        "maxTokens": 8192,
+        "thinkingLevelMap": { "minimal": null, "low": null, "high": null },
+        "samplingParamsByThinkingLevel": {
+          "off":    { "temperature": 0.7, "top_p": 0.8,  "top_k": 20, "presence_penalty": 1.5 },
+          "medium": { "temperature": 1.0, "top_p": 0.95, "top_k": 20, "presence_penalty": 0.0 }
+        }
+      }]
+    }
+  }
+}</code></pre></div>
+<div class="codewrap"><div class="label">~/.pi/agent/settings.json<button class="copy" type="button">Copy</button></div>
+<pre><code>{
+  "defaultThinkingLevel": "off",
+  "modelThinkingLevels": { "vllm/qwen3.8-27b": "off" },
+  "compaction": {
+    "modelOverrides": {
+      "vllm/qwen3.8-27b": { "reserveTokens": 16384, "keepRecentTokens": 16000 }
+    }
+  }
+}</code></pre></div>
+</div>
+<div class="two">
+<div class="codewrap"><div class="label">.spine/config.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>agent: pi
+parallel: 2
+adapters:
+  pi:
+    protocol: pi-rpc
+    version: 1.5.0
+    model: vllm/qwen3.8-27b
+    tool_timeout: 10m
+    max_turns: 80
+    stall_timeout: 20m
+    container:
+      image: spine-pi:1.5.0
+      network: host
+budget:
+  max_tokens: 3000000
+  per_run_timeout: 90m
+supervisor:
+  type: llm
+  model: qwen3.8-27b      # vLLM --served-model-name
+  effort: medium
+  timeout: 5m</code></pre></div>
+<div>
+<div class="codewrap"><div class="label">~/.config/spine/supervisor.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>max_agents: 2
+max_gates: 2</code></pre></div>
+<div class="codewrap"><div class="label">Controller environment (planner)<button class="copy" type="button">Copy</button></div>
+<pre><code># Assumption to check: the Go anthropic SDK reads ANTHROPIC_BASE_URL
+# and appends /v1/messages itself, so no /v1 here.
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8000
+export ANTHROPIC_API_KEY=local</code></pre></div>
+</div>
+</div>
+<h4>Alternative: Qwen3.6-35B-A3B UD-Q4_K_XL on llama.cpp, 3 agents at 64K</h4>
+<p>Much faster decode (3B active). llama.cpp splits layers across the two GPUs rather than doing tensor parallelism. The planner falls back to the rule supervisor here.</p>
+<div class="codewrap"><div class="label">llama-server, two GPUs<button class="copy" type="button">Copy</button></div>
+<pre><code>llama-server -hf unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_XL \
+  --alias qwen3.6-35b-a3b \
+  --jinja -ngl 99 -fa on \
+  --split-mode layer --tensor-split 1,1 \
+  -c 196608 --parallel 3 \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --reasoning-format deepseek \
+  --host 127.0.0.1 --port 8080
+# -c = 3 slots x 65536. Pi: same compat as the 24 GB tier, id "qwen3.6-35b-a3b",
+# contextWindow 65536; max_agents 3; supervisor type: rules.</code></pre></div>
+<p class="small">Also fits: Qwen3.8-27B UD-Q4_K_XL on llama.cpp at 6 / 3 / 1 sessions <span class="chip cmp">computed</span>, with the same layer-split caveat.</p>
+</div>
+</details>
+
+<!-- ============ 48 GB ============ -->
+<details class="tier" open>
+<summary>48 GB: Qwen3.8-27B-FP8 on vLLM</summary>
+<div class="tier-body">
+<p>4 agents at 64K (5 fit) <span class="chip cmp">computed</span>, plus the planner. Bake-off alternative: Qwen3.6-35B-A3B-FP8 with 7 sessions at 64K (<code>max_agents: 6</code>, <code>--max-num-seqs 7</code>).</p>
+<div class="codewrap"><div class="label">vLLM v0.33.0<button class="copy" type="button">Copy</button></div>
+<pre><code>vllm serve Qwen/Qwen3.8-27B-FP8 \
+  --served-model-name qwen3.8-27b \
+  --max-model-len 65536 \
+  --max-num-seqs 5 \
+  --gpu-memory-utilization 0.92 \
+  --kv-cache-dtype fp8 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --language-model-only \
+  --enable-prefix-caching \
+  --host 127.0.0.1 --port 8000</code></pre></div>
+<div class="two">
+<div class="codewrap"><div class="label">Differences from the 2&times;16 tier<button class="copy" type="button">Copy</button></div>
+<pre><code># models.json, settings.json, controller env: identical to the 2x16 tier
+# .spine/config.yaml
+parallel: 4
+adapters:
+  pi:
+    stall_timeout: 20m
+budget:
+  per_run_timeout: 90m
+supervisor:
+  type: llm
+  model: qwen3.8-27b
+  effort: medium
+  timeout: 5m</code></pre></div>
+<div class="codewrap"><div class="label">~/.config/spine/supervisor.yaml<button class="copy" type="button">Copy</button></div>
+<pre><code>max_agents: 4
+max_gates: 2</code></pre></div>
+</div>
+</div>
+</details>
+
+<!-- ============ 64 GB ============ -->
+<details class="tier" open>
+<summary>64 GB: Qwen3.8-27B-FP8 on vLLM</summary>
+<div class="tier-body">
+<p>8 agents at 64K (11 fit) <span class="chip cmp">computed</span>, plus the planner. Vendor numbers favour the dense 27B over Coder-Next (TB2 59.3 vs 36.2, both Terminus-2 and vendor-run; SWE-V 77.2 vs about 71) <span class="chip ven">vendor-reported</span>. Bake-off alternative: Qwen3-Coder-Next AWQ (cyankiwi, 48.25 GB), 10 sessions at 64K, non-thinking and fast.</p>
+<div class="codewrap"><div class="label">vLLM v0.33.0<button class="copy" type="button">Copy</button></div>
+<pre><code>vllm serve Qwen/Qwen3.8-27B-FP8 \
+  --served-model-name qwen3.8-27b \
+  --max-model-len 65536 \
+  --max-num-seqs 9 \
+  --gpu-memory-utilization 0.92 \
+  --kv-cache-dtype fp8 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --language-model-only \
+  --enable-prefix-caching \
+  --host 127.0.0.1 --port 8000
+# .spine/config.yaml: parallel 4 per repo is fine; supervisor.yaml: max_agents 8.
+# Everything else as the 48 GB tier.</code></pre></div>
+<div class="codewrap"><div class="label">Alternative: Qwen3-Coder-Next AWQ<button class="copy" type="button">Copy</button></div>
+<pre><code>vllm serve cyankiwi/Qwen3-Coder-Next-AWQ-4bit \
+  --served-model-name qwen3-coder-next \
+  --max-model-len 65536 \
+  --max-num-seqs 10 \
+  --gpu-memory-utilization 0.92 \
+  --kv-cache-dtype fp8 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --enable-prefix-caching \
+  --host 127.0.0.1 --port 8000
+# No reasoning parser (non-thinking model). If the causal_conv1d_update CUDA-graph
+# assert appears, lower --max-cudagraph-capture-size (recipe, PR #34571).
+# Pi model: "reasoning": false, contextWindow 65536, maxTokens 8192,
+#   "samplingParams": { "temperature": 1.0, "top_p": 0.95, "top_k": 40 }
+# supervisor.yaml max_agents 9 (one seq for the planner).</code></pre></div>
+</div>
+</details>
+
+<h3>Bake-off candidates on 2&times;16 GB (other engines)</h3>
+<div class="codewrap"><div class="label">Devstral Small 2, GLM-4.7-Flash, gpt-oss-20b<button class="copy" type="button">Copy</button></div>
+<pre><code># Devstral Small 2 UD-Q4_K_XL: 1 session at 64K, 3 at 32K (computed)
+llama-server -hf unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF:UD-Q4_K_XL \
+  --alias devstral-small-2 --jinja -ngl 99 -fa on \
+  --split-mode layer --tensor-split 1,1 -c 65536 --parallel 1 \
+  --cache-type-k q8_0 --cache-type-v q8_0 --host 127.0.0.1 --port 8080
+# Pi: "reasoning": false, temperature 0.15; if "roles must alternate" errors appear,
+# set compat "requiresAssistantAfterToolResult": true.
+
+# GLM-4.7-Flash UD-Q4_K_XL: 4 sessions at 64K (computed)
+llama-server -hf unsloth/GLM-4.7-Flash-GGUF:UD-Q4_K_XL \
+  --alias glm-4.7-flash --jinja -ngl 99 -fa on \
+  --split-mode layer --tensor-split 1,1 -c 262144 --parallel 4 \
+  --cache-type-k q8_0 --cache-type-v q8_0 --reasoning-format deepseek \
+  --host 127.0.0.1 --port 8080
+# Pi: "reasoning": true, thinkingFormat "chat-template",
+#   chatTemplateKwargs { "enable_thinking": { "$var": "thinking.enabled" } }  (kwarg name: verify)
+
+# gpt-oss-20b on vLLM TP=2: 13 sessions fit at 64K (MXFP4, computed). --max-num-seqs 3 keeps
+# max_agents at 2 (+1 planner slot), the same as the other candidates, so the comparison is fair.
+vllm serve openai/gpt-oss-20b --served-model-name gpt-oss-20b -tp 2 \
+  --max-model-len 65536 --max-num-seqs 3 --gpu-memory-utilization 0.92 \
+  --kv-cache-dtype fp8 --kv-cache-dtype-skip-layers sliding_window \
+  --enable-auto-tool-choice --tool-call-parser openai \
+  --enable-prefix-caching --host 127.0.0.1 --port 8000</code></pre></div>
+</section>
+
+<section id="s6">
+<h2>6. Bake-off plan and the Quality/Costs addition</h2>
+
+<h3>Bake-off</h3>
+<dl class="kv">
+<dt>Tasks</dt><dd>10&ndash;20 representative tasks from a real repo with known-good gates. Mix: a bugfix with a failing test; a small feature; a refactor across several files; test-writing; a config or docs change; at least one task that needs exact-match edits in whitespace-sensitive files (YAML, Makefile, Python indentation, trailing newlines) to expose the vLLM newline-strip risk.</dd>
+<dt>Controls</dt><dd>Same Pi 1.5.0 image, same gates, same <code>.spine/config.yaml</code> guardrails, same per-slot context for the tier (64K on 2&times;16), same <code>max_agents</code> for every candidate. 2&ndash;3 seeds per task.</dd>
+<dt>Candidates (2&times;16)</dt><dd>Qwen3.8-27B INT4 (vLLM TP=2); Qwen3.6-35B-A3B Q4 (llama.cpp); gpt-oss-20b; Devstral Small 2 Q4; GLM-4.7-Flash Q4.</dd>
+<dt>Sizing</dt><dd>12 tasks &times; 2 seeds = 24 runs per candidate is a workable first pass; add the third seed only for the top two.</dd>
+</dl>
+<div class="scroll">
+<table>
+<thead><tr><th>Metric</th><th>Definition</th><th>From</th></tr></thead>
+<tbody>
+<tr><td>First-round pass rate</td><td>Share of tasks whose gates pass on round 1</td><td>Outcome <code>round</code>, gate result</td></tr>
+<tr><td>Rounds per task</td><td>Patch rounds used until pass or give-up</td><td>Outcome <code>round</code>, <code>attempt</code></td></tr>
+<tr><td>Tokens per task</td><td>Sum of <code>tokens_used</code> across rounds; also turns and duration</td><td>Outcome</td></tr>
+<tr><td>Guardrail aborts by reason</td><td>Timeout, BudgetExceeded, Stalled, Crashed</td><td>Outcome <code>reason</code>, <code>stop_reason</code></td></tr>
+<tr><td>Failed edit calls</td><td>Edit tool errors: "Could not find" (not found) and "Found N occurrences" (duplicate)</td><td>Pi <code>tool_execution_end</code> with <code>isError</code> (needs the addition below)</td></tr>
+<tr><td>Tool calls leaked as text</td><td>Assistant text containing tool-call markup (<code>&lt;tool_call&gt;</code>, <code>&lt;function=</code>, harmony tags) with no structured call</td><td>Pi message events (needs the addition below)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Quality and Costs pages: scope (no code now)</h3>
+<p>The dashboard on <code>main</code> has overview, task, events and create routes. There were no Quality or Costs pages on <code>main</code> when checked; they are being built in another session. This scope is an addition to those pages.</p>
+<p><code>api.Outcome</code> today records <code>attempt</code>, <code>round</code>, <code>reason</code>, <code>stop_reason</code>, <code>exit_code</code>, <code>tokens_used</code>, <code>cost_usd</code>, <code>turns</code> and <code>duration</code>. It has no adapter, no model and no tool-error counts. The task Spec has <code>adapter</code> (empty means the config default).</p>
+<ol>
+<li><strong>Record identity.</strong> Add adapter name and resolved provider/model to each Outcome, and to the decision/outcome event. Resolve the empty Spec adapter to the config default at run time.</li>
+<li><strong>Count tool errors.</strong> In <code>pirpc.go</code>, count <code>tool_execution_end</code> events with <code>isError</code> per tool name (edit, bash, read, write), and count text-leaked tool calls from assistant text.</li>
+<li><strong>Quality page.</strong> Group by adapter + model, with a filter: first-round pass rate, rounds per task, aborts by reason, failed edits per run.</li>
+<li><strong>Costs page.</strong> Same grouping and filter: tokens, turns, duration. <code>cost_usd</code> is 0 for local models, so show tokens and duration as the primary cost.</li>
+</ol>
+<h4>Acceptance criteria</h4>
+<ul>
+<li>Every new Outcome has non-empty adapter and model; the decision/outcome event carries both.</li>
+<li>A run with a failing edit shows <code>tool_errors.edit &ge; 1</code>; a clean run shows none.</li>
+<li>Quality and Costs pages group by adapter + model and filter to one model; numbers match a manual count over the stored outcomes for at least one bake-off candidate.</li>
+<li>Older outcomes without the new fields render as "unknown" and do not break either page.</li>
+</ul>
+<p><strong>Estimate:</strong> a small change, touching <code>api.Outcome</code>, <code>internal/agent/pirpc.go</code>, the storage events and the two dashboard pages.</p>
+</section>
+
+<section id="unverified">
+<h2>Unverified items</h2>
+<p>Each item below either has no primary source in the notes or is an assumption made in this report.</p>
+<ul>
+<li><span class="chip unv">unverified</span> Qwen3.8 parser names and minimum vLLM/SGLang versions are assumed equal to Qwen3.5/3.6 (same config shape).</li>
+<li><span class="chip unv">unverified</span> The Go Anthropic SDK honours <code>ANTHROPIC_BASE_URL</code>.</li>
+<li><span class="chip unv">unverified</span> vLLM's <code>reasoning_effort</code> mapping reaches Qwen3.8's template effort levels for planner requests.</li>
+<li><span class="chip unv">unverified</span> llama-server applies a per-request <code>reasoning_effort</code> to gpt-oss on chat completions.</li>
+<li><span class="chip unv">unverified</span> If vLLM runs with <code>--api-key</code>, whether it accepts the Anthropic SDK's key header on <code>/v1/messages</code>. The snippets avoid this by binding to a private address.</li>
+<li><span class="chip unv">unverified</span> vLLM Qwen3 parser newline stripping: code behaviour seen, no Qwen-specific issue found.</li>
+<li><span class="chip unv">unverified</span> Engine layout and dtype of DeltaNet/Mamba state (fp32 assumed).</li>
+<li><span class="chip unv">unverified</span> FP8 KV on Gated DeltaNet hybrids: no explicit guidance.</li>
+<li><span class="chip unv">unverified</span> Qwen3-Coder-Next extended (YaRN) context; exact release dates of Coder-Next, Qwen3.8-Flash-Next and Qwen-AgentWorld.</li>
+<li><span class="chip unv">unverified</span> Harness for Devstral Small 2 vendor numbers, GLM-4.7-Flash SWE-V scaffold, Qwen3.8-27B vendor harness; Qwen3-Coder-30B OpenHands turn budget.</li>
+<li><span class="chip unv">unverified</span> GLM-4.7-Flash official context length; llama.cpp gating fix PR/build (#18980, b7786); GLM <code>enable_thinking</code> kwarg name used with Pi.</li>
+<li><span class="chip unv">unverified</span> Status of llama.cpp Qwen3.5 reports #20182, #19872, #19382.</li>
+<li><span class="chip unv">unverified</span> Minimum versions: Devstral on vLLM; SGLang for gpt-oss, Qwen3-14B and Qwen3-Coder-30B.</li>
+<li><span class="chip unv">unverified</span> llama.cpp <code>/v1/messages</code> first build number.</li>
+<li><span class="chip unv">unverified</span> KV-quant tool-call regression (LM Studio/MLX anecdote).</li>
+<li><span class="chip unv">unverified</span> gpt-oss empty-analysis prefill to skip reasoning (community hack).</li>
+<li><span class="chip unv">unverified</span> Gemma 4 K=V global cache storage in runtimes.</li>
+<li><span class="chip unv">unverified</span> Terminal-Bench 1.0 numbers; BFCL/&tau;&sup2;/Aider for Coder-Next.</li>
+<li><span class="chip unv">unverified</span> Pi prompt and tool sizes were rebuilt from source strings, not captured on the wire.</li>
+</ul>
+</section>
+
+<section id="sources">
+<h2>Sources</h2>
+<h4>Model cards and reports</h4>
+<ul class="sources">
+<li><a href="https://huggingface.co/Qwen/Qwen3.8-27B">Qwen/Qwen3.8-27B</a>, <a href="https://huggingface.co/Qwen/Qwen3.8-27B-FP8">-FP8</a>, <a href="https://huggingface.co/unsloth/Qwen3.8-27B-GGUF">unsloth GGUF</a>, <a href="https://huggingface.co/RedHatAI/Qwen3.8-27B-INT4">RedHatAI INT4</a>, <a href="https://huggingface.co/cyankiwi/Qwen3.8-27B-AWQ-INT4">cyankiwi AWQ</a>, <a href="https://qwen.ai/blog?id=qwen3.8">Qwen3.8 blog</a></li>
+<li><a href="https://huggingface.co/Qwen/Qwen3.6-27B">Qwen/Qwen3.6-27B</a>, <a href="https://huggingface.co/Qwen/Qwen3.5-27B">Qwen3.5-27B</a>, <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B">Qwen3.6-35B-A3B</a>, <a href="https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8">-FP8</a>, <a href="https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF">unsloth GGUF</a></li>
+<li><a href="https://github.com/QwenLM/Qwen3.6">QwenLM GitHub News</a></li>
+<li><a href="https://huggingface.co/Qwen/Qwen3-Coder-Next">Qwen3-Coder-Next</a>, <a href="https://qwen.ai/blog?id=qwen3-coder-next">blog</a>, <a href="https://arxiv.org/html/2603.00729">tech report arXiv 2603.00729</a>, <a href="https://huggingface.co/cyankiwi/Qwen3-Coder-Next-AWQ-4bit">cyankiwi AWQ</a>, <a href="https://huggingface.co/unsloth/Qwen3-Coder-Next-GGUF">unsloth GGUF</a>, <a href="https://unsloth.ai/docs/models/qwen3-coder-next">unsloth doc</a></li>
+<li><a href="https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct">Qwen3-Coder-30B-A3B-Instruct</a>, <a href="https://huggingface.co/Qwen/Qwen3-14B">Qwen3-14B</a>, <a href="https://arxiv.org/html/2505.09388">Qwen3 tech report</a>, <a href="https://qwen.readthedocs.io/en/latest/framework/function_call.html">Qwen function calling docs</a></li>
+<li><a href="https://huggingface.co/openai/gpt-oss-20b">openai/gpt-oss-20b</a>, <a href="https://arxiv.org/html/2508.10925">model card arXiv 2508.10925</a>, <a href="https://github.com/openai/openai-cookbook/blob/main/articles/openai-harmony.md">harmony guide</a>, <a href="https://huggingface.co/unsloth/gpt-oss-20b-GGUF">unsloth GGUF</a></li>
+<li><a href="https://huggingface.co/mistralai/Devstral-Small-2-24B-Instruct-2512">Devstral Small 2</a>, <a href="https://mistral.ai/news/devstral-2-vibe-cli">Mistral blog</a>, <a href="https://huggingface.co/unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF">unsloth GGUF</a>, <a href="https://unsloth.ai/docs/models/devstral-2">unsloth doc</a></li>
+<li><a href="https://huggingface.co/zai-org/GLM-4.7-Flash">GLM-4.7-Flash</a>, <a href="https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF">unsloth GGUF</a>, <a href="https://unsloth.ai/docs/models/tutorials/glm-4.7-flash">unsloth doc</a>, <a href="https://docs.nvidia.com/nemo/megatron-bridge/latest/models/glm/glm47.html">NVIDIA Megatron-Bridge GLM docs</a></li>
+<li><a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16">Nemotron 3 Nano</a>, <a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16">Nemotron 3.5 Lightning</a>, <a href="https://huggingface.co/google/gemma-4-26B-A4B-it">Gemma 4 26B-A4B</a>, <a href="https://huggingface.co/google/gemma-4-31B-it">Gemma 4 31B</a>, <a href="https://ai.google.dev/gemma/docs/releases">Gemma releases</a>, <a href="https://huggingface.co/ibm-granite/granite-4.2-30b">Granite 4.2 30B</a></li>
+</ul>
+<h4>Serving engines</h4>
+<ul class="sources">
+<li>vLLM: <a href="https://docs.vllm.ai/en/latest/features/tool_calling.html">tool calling</a>, <a href="https://docs.vllm.ai/en/latest/features/reasoning_outputs.html">reasoning outputs</a>, <a href="https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache.html">quantized KV cache</a>, <a href="https://docs.vllm.ai/en/latest/design/hybrid_kv_cache_manager.html">hybrid KV cache manager</a>, <a href="https://vllm.ai/blog/2026-04-22-fp8-kvcache">FP8 KV blog</a>, recipes for <a href="https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html">Qwen3.5/3.6</a>, <a href="https://recipes.vllm.ai/Qwen/Qwen3.6-27B">Qwen3.6-27B</a>, <a href="https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3-Coder-480B-A35B.html">Qwen3-Coder</a>, <a href="https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html">gpt-oss</a>, <a href="https://recipes.vllm.ai/openai/gpt-oss-20b?variant=default">gpt-oss-20b</a>, <a href="https://recipes.vllm.ai/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16">Nemotron 3 Nano</a>; <a href="https://discuss.vllm.ai/t/status-of-gpt-oss/2316">gpt-oss status thread</a>; code <code>vllm/entrypoints/anthropic/</code>, <code>vllm/parser/qwen3.py</code> at main @56e993a</li>
+<li>SGLang: <a href="https://docs.sglang.io/advanced_features/tool_parser.html">tool parser</a>; code <code>python/sglang/srt/entrypoints/anthropic/</code> at main @a4bef20</li>
+<li>llama.cpp: <a href="https://github.com/ggml-org/llama.cpp/pull/17570">PR #17570 (/v1/messages)</a>, <a href="https://huggingface.co/blog/ggml-org/anthropic-messages-api-in-llamacpp">Anthropic Messages blog</a>, <code>tools/server/README.md</code> and <code>tools/server/server-chat.cpp</code> at master @149f564; PRs #16932, #18675, #19324, #20213, #20393; issues #19305, #20260, #20837</li>
+</ul>
+<h4>Leaderboards and harnesses</h4>
+<ul class="sources">
+<li><a href="https://swe-bench.github.io">SWE-bench leaderboards</a>, <a href="https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard">Terminal-Bench 2.0 HF leaderboard</a>, <a href="https://arxiv.org/html/2602.21193">arXiv 2602.21193 (TB2 Terminus-2 results)</a>, <a href="https://gorilla.cs.berkeley.edu/data_overall.csv">BFCL V4 csv</a>, <a href="https://github.com/itayinbarr/little-coder">little-coder</a></li>
+</ul>
+<h4>Pi and Spine</h4>
+<ul class="sources">
+<li><a href="https://github.com/earendil-works/pi">Pi</a> tag v1.5.0 (commit f9a2636): <code>packages/ai/src/api/openai-completions.ts</code>, <code>packages/coding-agent/src/core/{system-prompt,settings-defaults,defaults,sdk}.ts</code>, <code>core/tools/edit*.ts</code>, <code>docs/models-configuration.md</code>, <code>docs/compaction.md</code>; schema <a href="https://pi.dev/schemas/models.schema.json">models.schema.json</a></li>
+<li>spine-next <code>main</code>: <code>internal/agent/pirpc.go</code>, <code>internal/agent/container.go</code>, <code>internal/config/config.go</code>, <code>internal/supervisor/registry.go</code>, <code>internal/reconciler/controller.go</code>, <code>internal/api/task.go</code>, <code>README.md</code></li>
+<li>Research notes: <code>qwen_models.md</code>, <code>other_models.md</code>, <code>serving_benchmarks.md</code>, <code>pi_config.md</code>, <code>memory_calc.md</code></li>
+</ul>
+</section>
+
+<div class="footer">Prepared 2026-11-04. Memory figures are computed, not measured. Benchmark scores are as published by their sources.</div>
+</div>
+
+<script>
+(function () {
+  var buttons = document.querySelectorAll('.copy');
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].addEventListener('click', function (e) {
+      var btn = e.currentTarget;
+      var pre = btn.closest('.codewrap').querySelector('pre');
+      var text = pre ? pre.innerText : '';
+      function done(ok) {
+        btn.textContent = ok ? 'Copied' : 'Select and copy';
+        setTimeout(function () { btn.textContent = 'Copy'; }, 1600);
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallback(); });
+        } else { fallback(); }
+      } catch (err) { fallback(); }
+      function fallback() {
+        try {
+          var r = document.createRange();
+          r.selectNodeContents(pre);
+          var s = window.getSelection();
+          s.removeAllRanges();
+          s.addRange(r);
+          var ok = document.execCommand && document.execCommand('copy');
+          done(!!ok);
+        } catch (err2) { done(false); }
+      }
+    });
+  }
+})();
+</script>

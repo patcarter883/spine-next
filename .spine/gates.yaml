@@ -1,0 +1,12 @@
+# Spine gates: deterministic checks a task must pass before it integrates.
+# Read from the base branch (commit this file). Policies: absolute (exit 0)
+# or baseline (no NEW failures compared with the base tree).
+gates:
+  parse:    {tool: ts.parse}
+  scope:    {tool: diff.scope}
+  nonempty: {tool: diff.nonempty}
+  build:    {tool: go.build}
+  vet:      {tool: go.vet}
+  unit:     {tool: go.test, policy: baseline}
+  api:      {tool: ts.api_contract}
+order: [parse, scope, nonempty, build, vet, unit, api]

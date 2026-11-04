@@ -256,6 +256,7 @@ ol.sources li, ul.sources li { font-size: 0.88rem; max-width: none; overflow-wra
 <a href="#s4">4. Benchmarks</a>
 <a href="#s5">5. Fit to Spine</a>
 <a href="#s6">6. Bake-off and Quality/Costs</a>
+<a href="#s7">7. Wider search</a>
 <a href="#unverified">Unverified</a>
 <a href="#sources">Sources</a>
 </nav>
@@ -276,6 +277,16 @@ ol.sources li, ul.sources li { font-size: 0.88rem; max-width: none; overflow-wra
 <tr><td><strong>64 GB</strong></td><td>Qwen3.8-27B-FP8, vLLM</td><td class="num">8 @ 64K (11 fit) <span class="chip cmp">computed</span></td><td>Same server</td><td>Qwen3-Coder-Next AWQ (cyankiwi), 10 @ 64K</td></tr>
 </tbody>
 </table>
+</div>
+
+<div class="callout">
+<p><strong>Update after the wider search (section 7).</strong> Two models change the picture, mainly because their KV cache is small:</p>
+<ul>
+<li><strong>Muse Glimmer 30B</strong> (Meta, dense, Apache-2.0) needs about 6.5 KiB of KV per token. On 2&times;16 GB at INT4 it fits <strong>5 sessions at 64K</strong> on vLLM, against 2 for Qwen3.8-27B, with similar vendor scores (SWE-V 76.0 vs 77.2 for Qwen3.6-27B). Its thinking cannot be turned off, so each turn costs more tokens. It joins Qwen3.8-27B as a co-lead in the 2&times;16 bake-off, and it is the better fit at 24 GB (9 sessions at 64K against 1).</li>
+<li><strong>Mellum2.1 12B-A2.5B</strong> (JetBrains) replaces gpt-oss-20b at 16 GB: 10 sessions at 64K at Q4, and the only model with published results measured in Pi (SWE-V 47.0).</li>
+<li><strong>KAT-Coder-V2.5-Dev</strong>, a Qwen3.6-35B-A3B fine-tune trained in a harness close to Pi's tools, replaces plain Qwen3.6-35B-A3B as the fast MoE alternative.</li>
+</ul>
+<p>All three rest on vendor numbers only. The bake-off in section 6 decides.</p>
 </div>
 
 <h4>Why these picks</h4>
@@ -1025,7 +1036,7 @@ vllm serve openai/gpt-oss-20b --served-model-name gpt-oss-20b -tp 2 \
 <dl class="kv">
 <dt>Tasks</dt><dd>10&ndash;20 representative tasks from a real repo with known-good gates. Mix: a bugfix with a failing test; a small feature; a refactor across several files; test-writing; a config or docs change; at least one task that needs exact-match edits in whitespace-sensitive files (YAML, Makefile, Python indentation, trailing newlines) to expose the vLLM newline-strip risk.</dd>
 <dt>Controls</dt><dd>Same Pi 1.5.0 image, same gates, same <code>.spine/config.yaml</code> guardrails, same per-slot context for the tier (64K on 2&times;16), same <code>max_agents</code> for every candidate. 2&ndash;3 seeds per task.</dd>
-<dt>Candidates (2&times;16)</dt><dd>Qwen3.8-27B INT4 (vLLM TP=2); Qwen3.6-35B-A3B Q4 (llama.cpp); gpt-oss-20b; Devstral Small 2 Q4; GLM-4.7-Flash Q4.</dd>
+<dt>Candidates (2&times;16)</dt><dd>First pass: Qwen3.8-27B INT4 and Muse Glimmer 30B INT4 (both vLLM TP=2), KAT-Coder-V2.5-Dev Q4 (llama.cpp), Mellum2.1 Q4 as the small baseline. Second pass if time allows: North Mini Code, Laguna XS 2.1, Devstral Small 2, GLM-4.7-Flash, gpt-oss-20b.</dd>
 <dt>Sizing</dt><dd>12 tasks &times; 2 seeds = 24 runs per candidate is a workable first pass; add the third seed only for the top two.</dd>
 </dl>
 <div class="scroll">
@@ -1059,6 +1070,81 @@ vllm serve openai/gpt-oss-20b --served-model-name gpt-oss-20b -tp 2 \
 <li>Older outcomes without the new fields render as "unknown" and do not break either page.</li>
 </ul>
 <p><strong>Estimate:</strong> a small change, touching <code>api.Outcome</code>, <code>internal/agent/pirpc.go</code>, the storage events and the two dashboard pages.</p>
+</section>
+
+<section id="s7">
+<h2>7. Wider search: models not on the original list</h2>
+<p>A second pass covered Chinese labs, Western and other labs, agentic-coding fine-tunes, and pruned or very low-bit versions of larger MoEs. Notes: <code>expanded_chinese_labs.md</code>, <code>expanded_other_labs.md</code>, <code>expanded_finetunes_pruned.md</code>. Memory uses the same formula as section 2 (<code>mem2.py</code>, same assumptions). For sliding-window layers the fixed cost is the window only, at FP8.</p>
+
+<h3>Candidates worth a bake-off slot</h3>
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Model</th><th>Type</th><th class="num">KV/token FP8</th><th>Thinking</th><th>License</th><th>Agentic scores</th></tr></thead>
+<tbody>
+<tr><td><a href="https://huggingface.co/meta-models/Muse-Glimmer-30B">meta-models/Muse-Glimmer-30B</a><span class="sub">2026-08</span></td><td>Dense 29.6B, vision; 3 sliding (2048) : 1 full, 2 KV heads</td><td class="num">6.5 KiB <span class="chip cmp">computed</span></td><td>Cannot be turned off; <code>low</code> is the minimum</td><td>Apache-2.0</td><td>SWE-V 76.0, TB 2.1 51.7, harness not stated <span class="chip ven">vendor-reported</span></td></tr>
+<tr><td><a href="https://huggingface.co/JetBrains/Mellum2.1-12B-A2.5B-Thinking">JetBrains/Mellum2.1-12B-A2.5B-Thinking</a><span class="sub">2026-09</span></td><td>MoE 12B / 2.5B; 3 sliding (1024) : 1 full</td><td class="num">7.0 KiB <span class="chip cmp">computed</span></td><td><code>enable_thinking=false</code></td><td>Apache-2.0</td><td>SWE-V 47.0, TB 2.1 17.4, <strong>measured in Pi</strong> (v0.73.1) <span class="chip ven">vendor-reported</span></td></tr>
+<tr><td><a href="https://huggingface.co/Kwaipilot/KAT-Coder-V2.5-Dev">Kwaipilot/KAT-Coder-V2.5-Dev</a><span class="sub">2026-07</span></td><td>Qwen3.6-35B-A3B fine-tune (SFT + RL)</td><td class="num">10.0 KiB <span class="chip cmp">computed</span></td><td><code>enable_thinking=false</code></td><td>Apache-2.0</td><td>SWE-V 69.4 vs 64.4 for its base in the same Claude Code pipeline; TB 2.1 41.0 <span class="chip ven">vendor-reported</span>. Qwen's own number for the base is higher (73.4).</td></tr>
+<tr><td><a href="https://huggingface.co/poolside/Laguna-XS-2.1">poolside/Laguna-XS-2.1</a><span class="sub">2026</span></td><td>MoE 33B / 3B; 3 sliding (512) : 1 full</td><td class="num">20.0 KiB <span class="chip cmp">computed</span></td><td>Per request, <code>enable_thinking</code></td><td>OpenMDW-1.1</td><td>SWE-V 70.9, TB2 37.5 (Poolside harness) <span class="chip ven">vendor-reported</span></td></tr>
+<tr><td><a href="https://huggingface.co/CohereLabs/North-Mini-Code-1.0">CohereLabs/North-Mini-Code-1.0</a><span class="sub">2026-06</span></td><td>MoE 30B / 3B; 3 sliding (4096) : 1 full</td><td class="num">13.0 KiB <span class="chip cmp">computed</span></td><td><code>reasoning_effort: none</code></td><td>Apache-2.0</td><td>SWE-V 61.0 with mini-SWE-agent (<a href="https://huggingface.co/blog/CohereLabs/introducing-north-mini-code">blog</a>), TB2 about 36 <span class="chip ven">vendor-reported</span></td></tr>
+<tr><td><a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16">Nemotron 3.5 Bolt 74B-A9B</a><span class="sub">2026-10</span></td><td>Mamba-2 + MoE, 8 attention layers</td><td class="num">4.0 KiB + 168 MB state <span class="chip cmp">computed</span></td><td><code>enable_thinking</code> toggle</td><td>OpenMDW-1.1</td><td>TB 2.1 51&ndash;54; no SWE-bench <span class="chip ven">vendor-reported</span></td></tr>
+</tbody>
+</table>
+</div>
+<p class="small">Every score above is the vendor's own. No independent result exists for any of them. Mellum is the only one measured with Pi itself, which makes its numbers the most transferable even though they are the lowest.</p>
+
+<h3>Concurrent sessions at 32K / 64K / 128K <span class="chip cmp">computed</span></h3>
+<div class="scroll">
+<table class="nums">
+<thead><tr><th>Model / quant (weights)</th><th class="num">16 GB</th><th class="num">24 GB</th><th class="num">1&times;32 GB</th><th class="num">2&times;16 TP</th><th class="num">48 GB</th><th class="num">64 GB</th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="7">Muse Glimmer 30B <span class="small">session GB 0.26 / 0.48 / 0.91</span></td></tr>
+<tr><td>FP8 (34.4 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">31/17/9</td><td class="num">88/48/25</td></tr>
+<tr><td>UD-Q4_K_XL (15.9 GB)</td><td class="none">-</td><td class="num pick">18/9/5</td><td class="num">46/25/13</td><td class="num">34/18/9</td><td class="num">103/56/29</td><td class="num">160/86/45</td></tr>
+<tr><td>INT4, RedHatAI (22.2 GB)</td><td class="none">-</td><td class="none">-</td><td class="num">22/12/6</td><td class="num pick">10/5/3</td><td class="num">78/42/22</td><td class="num">135/73/38</td></tr>
+<tr class="group"><td colspan="7">Mellum2.1 12B-A2.5B <span class="small">session GB 0.26 / 0.49 / 0.96</span></td></tr>
+<tr><td>Q4_K_M (8.1 GB)</td><td class="num pick">20/10/5</td><td class="num">48/25/13</td><td class="num">77/40/20</td><td class="num">65/34/17</td><td class="num">134/70/35</td><td class="num">191/100/51</td></tr>
+<tr><td>Q6_K (10.9 GB)</td><td class="num">9/4/2</td><td class="num">37/19/10</td><td class="num">66/34/17</td><td class="num">54/28/14</td><td class="num">123/64/33</td><td class="num">181/94/48</td></tr>
+<tr class="group"><td colspan="7">KAT-Coder-V2.5-Dev <span class="small">session GB 0.40 / 0.73 / 1.41</span></td></tr>
+<tr><td>Q4_K_M (21.4 GB)</td><td class="none">-</td><td class="none">-</td><td class="num">16/8/4</td><td class="num">8/4/2</td><td class="num">53/28/15</td><td class="num">90/49/25</td></tr>
+<tr><td>IQ4_XS (18.8 GB)</td><td class="none">-</td><td class="num">4/2/1</td><td class="num">22/12/6</td><td class="num">15/8/4</td><td class="num">59/32/16</td><td class="num">96/52/27</td></tr>
+<tr><td>AWQ-INT4 (24.4 GB)</td><td class="none">-</td><td class="none">-</td><td class="num">8/4/2</td><td class="num">1/0/0</td><td class="num">45/24/12</td><td class="num">82/44/23</td></tr>
+<tr class="group"><td colspan="7">Laguna XS 2.1 <span class="small">session GB 0.70 / 1.37 / 2.72</span></td></tr>
+<tr><td>Q4_K_M (20.3 GB)</td><td class="none">-</td><td class="num">0/0/0</td><td class="num">10/5/2</td><td class="num">6/3/1</td><td class="num">31/16/8</td><td class="num">52/27/13</td></tr>
+<tr><td>FP8 (35.3 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">10/5/2</td><td class="num">31/16/8</td></tr>
+<tr class="group"><td colspan="7">North Mini Code <span class="small">session GB 0.59 / 1.02 / 1.90</span></td></tr>
+<tr><td>UD-Q4_K_XL (19.2 GB)</td><td class="none">-</td><td class="num">2/1/0</td><td class="num">14/8/4</td><td class="num">9/5/3</td><td class="num">39/22/12</td><td class="num">64/37/20</td></tr>
+<tr><td>AWQ-INT4 (18.5 GB)</td><td class="none">-</td><td class="num">3/2/1</td><td class="num">16/9/4</td><td class="num">11/6/3</td><td class="num">41/23/12</td><td class="num">66/38/20</td></tr>
+<tr class="group"><td colspan="7">Nemotron 3.5 Bolt 74B-A9B <span class="small">session GB 0.30 / 0.44 / 0.70</span></td></tr>
+<tr><td>IQ2, NVIDIA 24GB build (24.1 GB)</td><td class="none">-</td><td class="none">-</td><td class="num">12/8/5</td><td class="num">2/1/1</td><td class="num">61/42/26</td><td class="num">110/76/47</td></tr>
+<tr><td>UD-Q4_K_XL (50.2 GB)</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="none">-</td><td class="num">23/16/10</td></tr>
+<tr class="group"><td colspan="7">Seed-OSS-36B (dense, full attention on all 64 layers) <span class="small">session GB 4.29 / 8.59 / 17.18</span></td></tr>
+<tr><td>UD-Q4_K_XL (22.0 GB)</td><td class="none">-</td><td class="none">-</td><td class="num">1/0/0</td><td class="num">0/0/0</td><td class="num">4/2/1</td><td class="num">8/4/2</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout">
+<p><strong>Sliding-window caveat.</strong> These counts charge sliding-window layers only their window. vLLM's hybrid KV cache manager allocates them that way. In llama.cpp the window-only cache can limit prompt reuse across Pi's turns; <code>--swa-full</code> restores it but stores every layer for the full context (Muse Glimmer: 52 layers &times; 2 KV heads &times; 128 &times; 2 &asymp; 26 KiB/token, about 4&times; the figure above). How llama.cpp's context checkpoints handle this for Pi's multi-turn pattern is <span class="chip unv">unverified</span>. Measure prompt-cache hits in the bake-off.</p>
+</div>
+
+<h3>Serving notes for the new candidates</h3>
+<ul>
+<li><strong>Muse Glimmer:</strong> vLLM <code>--tool-call-parser muse_glimmer --reasoning-parser muse_glimmer --generation-config auto</code>, image <code>v0.28.0</code> (<a href="https://recipes.vllm.ai/meta-models/Muse-Glimmer-30B">vLLM recipe</a>); SGLang cookbook exists; llama.cpp b10353+ with <code>--jinja</code>. Thinking always runs: set reasoning strength <code>low</code> and cap it with <code>--reasoning-budget</code> on llama.cpp. Expect more tokens per turn than a thinking-off Qwen.</li>
+<li><strong>Mellum2.1:</strong> vLLM <code>hermes</code> tool parser, <code>qwen3</code> reasoning parser; official GGUF with an MTP draft head for speculative decoding.</li>
+<li><strong>KAT-Coder-V2.5-Dev:</strong> identical to Qwen3.6-35B-A3B (<code>qwen3_coder</code> / <code>qwen3</code>, <code>--language-model-only</code> on vLLM). No MTP head. No unsloth GGUF; use bartowski.</li>
+<li><strong>Laguna XS 2.1:</strong> vLLM <code>poolside_v1</code> parsers need a build with PR #47311, otherwise tool calls are dropped silently. llama.cpp support merged in <a href="https://github.com/ggml-org/llama.cpp/pull/25165">PR #25165</a>, with open reports of reasoning running to the token budget.</li>
+<li><strong>North Mini Code:</strong> vLLM <code>cohere_command4</code> parsers plus the <code>cohere_melody</code> package. In llama.cpp use the repo's <code>chat_template.jinja</code>; the older template leaks reasoning into the reply.</li>
+</ul>
+
+<h3>Checked and set aside</h3>
+<ul>
+<li><strong>Too big for 64 GB at 4-bit:</strong> gpt-oss-120b (65.25 GB MXFP4), Mistral Small 4 (74 GB at Q4), every current DeepSeek, MiniMax, MiMo, StepFun, Tencent Hy3 and GLM-5.x model (199B and up). Zhipu has no GLM-4.6/4.7-Air.</li>
+<li><strong>Pruned or very low-bit large MoEs:</strong> MiniMax-M2.5-REAP-139B at IQ3_XXS (53.6 GB) leaves no room for even one 32K session at 124 KiB/token; GLM-4.5-Air-REAP-82B at IQ4_XS fits 1 at 64K. The REAP authors' own results show multi-turn tool calling can collapse at 50% pruning (Kimi-K2 BFCLv3 0.355 to 0.164), and a community audit found about 60% of 50%-pruned releases failed (<a href="https://arxiv.org/html/2510.13999">REAP paper</a>, <a href="https://github.com/DJLougen/reap-eval">reap-eval</a>). The 50%-pruned KAT-Coder reports SWE-V 52.0 against 69.4 unpruned. Not recommended for Pi.</li>
+<li><strong>Ornith-1.5-35B-A3B</strong> claims SWE-V 79 and TB 2.1 67.8, but Kwaipilot's re-run of Ornith-1.0 scored 55.8 / 36.0 against claims of 75.6 / 64.2 (<a href="https://huggingface.co/Kwaipilot/KAT-Coder-V2.5-Dev">KAT card</a>). Same architecture as KAT-Coder; include only if a slot is free.</li>
+<li><strong>Dense models with full attention everywhere</strong> (Seed-OSS-36B, KAT-Dev-72B-Exp, Granite 4.2) fit very few sessions; Seed-OSS gets 2 at 64K on 48 GB.</li>
+<li><strong>2025 SWE fine-tunes</strong> (OpenHands-LM, SWE-agent-LM, Skywork-SWE, DeepSWE, SERA, Kimi-Dev-72B and others): 32&ndash;40K context or heavy KV, scores at or below the Qwen3.6 bases, and they learned OpenHands or SWE-agent tool formats. SERA's card warns it may call a nonexistent <code>submit</code> tool.</li>
+<li><strong>License exclusions:</strong> Hunyuan-A13B excludes the EU, UK and South Korea; openPangu forbids EU use; CWM is non-commercial; EXAONE, Solar, Falcon and Llama 4 are non-permissive.</li>
+<li><strong>Serving not ready:</strong> LongCat-Flash-Lite-Sparse (SWE-V 68.2 vendor) is not in vLLM or SGLang main, and its 4-bit builds are 84&ndash;89 GB. The pruned Qwen3.8-Flash-Next coder GGUF (29.6 GB on GPU) is experimental and llama.cpp-only.</li>
+</ul>
 </section>
 
 <section id="unverified">

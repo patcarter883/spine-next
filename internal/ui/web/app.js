@@ -1052,7 +1052,7 @@ async function settingsPi(rn) {
     const out = $("#piChkOut"); e.target.disabled = true; out.textContent = "Checking…";
     try {
       const r = await send("POST", `/api/repos/${enc(rn)}/pi/check`, {});
-      out.innerHTML = r.ok ? `<span class="pass">✓ ${esc(r.message)}</span>${r.contained ? " The container check covers the version, not the model: use List models above to test the server." : ""}` : `<span class="fail">✗ ${esc(r.error)}</span>`;
+      out.innerHTML = r.ok ? `<span class="pass">✓ ${esc(r.message)}</span>${r.contained ? " Checked in the container: the version, and that Pi resolves the model from models.json. Use List models above to test the server." : ""}` : `<span class="fail">✗ ${esc(r.error)}</span>`;
     } catch (x) { out.innerHTML = `<span class="fail">${esc(x.message)}</span>` } finally { e.target.disabled = false }
   };
   piPoll(rn);

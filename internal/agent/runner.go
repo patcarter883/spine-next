@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,6 +90,15 @@ func ClaudeAdapter() Adapter {
 // PiVersion is the Pi release Spine is tested against; the built-in "pi"
 // adapter pins it (Pi ships breaking changes in minor releases).
 const PiVersion = "1.5.0"
+
+// PiPackage is Pi's npm package.
+const PiPackage = "@earendil-works/pi-coding-agent"
+
+// PiMinNode is engines.node of PiVersion's package.
+const PiMinNode = "22.19.0"
+
+// PiImage is the conventional tag of contrib/pi's image for a version.
+func PiImage(version string) string { return "spine-pi:" + strings.TrimPrefix(version, "v") }
 
 // PiAdapter is the built-in Pi adapter (RPC mode, version pinned). It runs
 // on the host unless the configuration gives it a container; `spine doctor`
@@ -478,6 +488,13 @@ func buildEnv(a Adapter) []string {
 		}
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)
+		}
+	}
+	// Whatever pass_env says, a host-run Pi reads the agent dir Spine resolves
+	// (a containerized one gets its private copy instead).
+	if a.Protocol == "pi-rpc" && a.Container == nil {
+		if v, ok := os.LookupEnv(PiAgentDirEnv); ok && !slices.Contains(pass, PiAgentDirEnv) {
+			env = append(env, PiAgentDirEnv+"="+v)
 		}
 	}
 	for k, v := range a.Env {

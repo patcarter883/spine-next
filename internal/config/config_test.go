@@ -102,3 +102,61 @@ func TestTemplates(t *testing.T) {
 		t.Fatal("duplicate accepted")
 	}
 }
+
+func TestApplyPiAdapter(t *testing.T) {
+	src := []byte(`# top comment
+agent: claude
+adapters:
+  pi:
+    protocol: pi-rpc # keep me
+    version: 1.4.0
+    pass_env: [PATH, HOME, MY_KEY]
+    tool_timeout: 5m
+    container:
+      image: old:1
+      user: "1000:1000"
+      mounts: [/data:/data:ro]
+      args: [--cpus, "2"]
+parallel: 3
+`)
+	out, err := ApplyPiAdapter(src, "pi", PiSettings{Version: "1.5.0", Model: "local/m", MakeDefault: true,
+		Container: &PiContainer{Image: "spine-pi:1.5.0", Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# top comment", "# keep me", "parallel: 3", "pass_env"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("lost %q:\n%s", want, out)
+		}
+	}
+	c, err := Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Adapters["pi"]
+	if c.Agent != "pi" || a.Version != "1.5.0" || a.Model != "local/m" || a.ToolTimeout != 0 {
+		t.Fatalf("adapter: %+v (default %s)", a, c.Agent)
+	}
+	if a.Container == nil || a.Container.Image != "spine-pi:1.5.0" || a.Container.Network != "none" || a.Container.User != "1000:1000" || len(a.Container.Mounts) != 1 || len(a.Container.Args) != 0 {
+		t.Fatalf("container: %+v", a.Container)
+	}
+
+	// No container: the block goes; an empty file gets a whole adapter.
+	out, err = ApplyPiAdapter(out, "pi", PiSettings{Version: "1.5.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = Parse(out); c.Adapters["pi"].Container != nil || c.Agent != "pi" {
+		t.Fatalf("after removal: %+v\n%s", c.Adapters["pi"], out)
+	}
+	out, err = ApplyPiAdapter(nil, "pi", PiSettings{Version: "1.5.0", MaxTurns: 40, ToolTimeout: "2m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Parse(out); err != nil || c.Adapters["pi"].MaxTurns != 40 || c.Agent != "claude" {
+		t.Fatalf("%v %+v", err, c)
+	}
+	if _, err := ApplyPiAdapter(nil, "pi", PiSettings{Version: "1.5.0", ToolTimeout: "soon"}); err == nil {
+		t.Fatal("a bad duration must not validate")
+	}
+}

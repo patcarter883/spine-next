@@ -66,7 +66,9 @@ What the controller guarantees:
 
 ## Local models with Pi
 
-Spine can run the [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (`@earendil-works/pi-coding-agent`) as the worker through Pi's RPC mode. Pi works with local OpenAI-compatible servers such as vLLM, SGLang, llama.cpp and Ollama. Add an adapter to `.spine/config.yaml`:
+Spine can run the [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) (`@earendil-works/pi-coding-agent`) as the worker through Pi's RPC mode. Pi works with local OpenAI-compatible servers such as vLLM, SGLang, llama.cpp and Ollama.
+
+The dashboard can do this setup for you: **Settings → Pi agent** builds the image or installs Pi with npm, writes `models.json` and edits the adapter. By hand, add an adapter to `.spine/config.yaml`:
 
 ```yaml
 agent: pi
@@ -174,6 +176,7 @@ Every other command works the same under the supervisor. `spine run`, `status`, 
 
 **Operations**
 - **Settings:** add and remove repositories; edit `.spine/config.yaml` through a form or as YAML (validated, comments kept; the controller restarts under the supervisor); change supervisor limits.
+- **Pi agent:** under **Settings** (admins), build the worker image or run the npm install at the adapter's pinned version with the output shown live; add model servers to `models.json` (list a server's models to test it, and other fields in the file are kept); set the adapter's version, model, container and limits; and run the same probe as `spine doctor --agent`. Commands are fixed: a request only picks the method. API keys are never sent back to the browser, and a `!command` key can only be set by editing the file. An edit to a tracked `.spine/config.yaml` must be committed before tasks can integrate into a checked-out base branch; the dashboard says so when it applies.
 - **Bulk actions:** approve, retry, cancel or hint many tasks at once.
 - **Pause and resume:** pause or resume a repository.
 

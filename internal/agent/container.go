@@ -128,6 +128,12 @@ func (c *Container) cleanup(w *wrapped) {
 }
 
 // cliEnv is the environment for the container CLI itself.
+// RuntimeName is the container command (docker unless configured).
+func (c *Container) RuntimeName() string { return c.runtime() }
+
+// CLIEnv is the environment for running the container CLI.
+func CLIEnv() []string { return cliEnv() }
+
 func cliEnv() []string {
 	var env []string
 	for _, k := range []string{"PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "CONTAINER_HOST", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME"} {

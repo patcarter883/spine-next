@@ -14,6 +14,7 @@ import (
 
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/config"
+	"github.com/patcarter883/spine-next/internal/gitro"
 	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/worktree"
 )
@@ -148,8 +149,7 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	path := filepath.Join(repo.Path, config.Path)
-	cur, _ := os.ReadFile(path)
+	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
 	var next []byte
 	switch {
 	case req.Raw != nil:
@@ -169,6 +169,13 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "send raw or settings")
 		return
 	}
+	s.writeConfig(w, r, repo, cur, next)
+}
+
+// writeConfig replaces .spine/config.yaml with validated content and, under
+// the supervisor, restarts the repository's controller to pick it up.
+func (s *Server) writeConfig(w http.ResponseWriter, r *http.Request, repo Repo, cur, next []byte) {
+	path := filepath.Join(repo.Path, config.Path)
 	if bytes.Equal(bytes.TrimSpace(cur), bytes.TrimSpace(next)) {
 		writeJSON(w, map[string]any{"changed": false})
 		return
@@ -182,6 +189,10 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"changed": true, "restarted": false}
+	// A modified tracked file holds up integration into a checked-out base.
+	if st, err := (gitro.Repo{Dir: repo.Path}).Run(r.Context(), "status", "--porcelain", "--untracked-files=no", "--", config.Path); err == nil && len(bytes.TrimSpace(st)) > 0 {
+		out["uncommitted"] = true
+	}
 	if s.Admin != nil {
 		if err := s.Admin.RestartRepo(repo.Name); err != nil {
 			out["restart_error"] = err.Error()

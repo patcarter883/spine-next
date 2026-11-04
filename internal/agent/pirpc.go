@@ -401,15 +401,27 @@ func piAgentDir(a Adapter) string {
 	if d := os.Getenv(PiAgentDirEnv); d != "" {
 		return d
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	d := home + "/.pi/agent"
+	d := PiAgentDir(a)
 	if _, err := os.Stat(d); err != nil {
 		return ""
 	}
 	return d
+}
+
+// PiAgentDir is where Pi reads models.json for this adapter, whether or not
+// the directory exists yet ("" when the home directory is unknown).
+func PiAgentDir(a Adapter) string {
+	if d, ok := a.Env[PiAgentDirEnv]; ok {
+		return d
+	}
+	if d := os.Getenv(PiAgentDirEnv); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home + "/.pi/agent"
 }
 
 // PiAgentFiles are copied from the host's Pi agent dir into a container

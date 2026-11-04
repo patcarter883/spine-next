@@ -116,6 +116,7 @@ type Server struct {
 	once    sync.Once
 	mux     *http.ServeMux
 	webURLs sync.Map // repo path -> forge URL ("" = none)
+	pi      piInstaller
 }
 
 // Handler returns the HTTP routes.
@@ -190,6 +191,14 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/admin/repos/{name}", s.need(auth.Admin, s.removeRepo))
 	m.HandleFunc("GET /api/admin/supervisor", s.supervisorSettings)
 	m.HandleFunc("PUT /api/admin/supervisor", s.need(auth.Admin, s.putSupervisorSettings))
+	m.HandleFunc("GET /api/repos/{repo}/pi", s.piStatus)
+	m.HandleFunc("PUT /api/repos/{repo}/pi/adapter", s.need(auth.Admin, s.putPiAdapter))
+	m.HandleFunc("PUT /api/repos/{repo}/pi/models", s.need(auth.Admin, s.putPiProvider))
+	m.HandleFunc("DELETE /api/repos/{repo}/pi/models/{provider}", s.need(auth.Admin, s.deletePiProvider))
+	m.HandleFunc("POST /api/repos/{repo}/pi/discover", s.need(auth.Admin, s.piDiscover))
+	m.HandleFunc("POST /api/repos/{repo}/pi/check", s.need(auth.Admin, s.piCheck))
+	m.HandleFunc("POST /api/repos/{repo}/pi/install", s.need(auth.Admin, s.piInstall))
+	m.HandleFunc("GET /api/pi/install", s.need(auth.Admin, s.piInstallJob))
 	for pattern, h := range s.Extra {
 		m.HandleFunc(pattern, h)
 	}

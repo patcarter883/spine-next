@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -160,5 +161,20 @@ func TestPiVersionPinned(t *testing.T) {
 	_, _, err = e.runPi(t, func(a *Adapter, _ *RunRequest) { a.Version = "" })
 	if err == nil || !strings.Contains(err.Error(), "must pin") {
 		t.Fatalf("want pin required, got %v", err)
+	}
+}
+
+func TestPiAgentDirReachesHostRun(t *testing.T) {
+	t.Setenv(PiAgentDirEnv, "/from/env")
+	has := func(a Adapter, want string) bool { return slices.Contains(buildEnv(a), PiAgentDirEnv+"="+want) }
+	host := Adapter{Protocol: "pi-rpc", PassEnv: []string{"PATH"}}
+	if !has(host, "/from/env") {
+		t.Fatal("a host-run Pi must get the agent dir, even with a custom pass_env")
+	}
+	if has(Adapter{Protocol: "pi-rpc", Container: &Container{Image: "x"}}, "/from/env") {
+		t.Fatal("a container gets its private copy, not the host path")
+	}
+	if has(Adapter{Protocol: "acp"}, "/from/env") {
+		t.Fatal("other agents don't need it")
 	}
 }

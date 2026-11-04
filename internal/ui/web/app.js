@@ -961,13 +961,14 @@ async function viewSettings() {
     ${can("admin") ? `<form class="f" id="addr" style="margin-top:10px"><div class="row"><label>Path to a git checkout<input name="path" required placeholder="/home/me/src/api"></label><label>Name (optional)<input name="name"></label></div><div><button class="btn">Add repository</button></div></form>` : ""}
     <p class="hint">Removing a repository stops its controller; its tasks and data stay in the repository.</p></section>` : ""}
    <section class="card"><h3>Repository configuration — ${esc(rn)}</h3><div id="cfg" class="muted">Loading…</div></section>
+   <section class="card"><h3>Pi agent — ${esc(rn)}</h3><div id="pi" class="muted">Loading…</div></section>
    <section class="card"><h3>Notifications</h3><div id="ntf" class="muted">${me.home ? "Loading…" : "Not available."}</div></section>
    <section class="card"><h3>Templates</h3><div id="tpl" class="muted">Loading…</div></section>
    <section class="card"><h3>Access</h3><p>${me.auth ? `Sign-in is required. You are <b>${esc(me.user?.name)}</b> (${esc(me.user?.role)}).` : `No users exist: the dashboard serves loopback only and records changes as the local user.`}${me.read_only ? " This dashboard is <b>read-only</b>." : ""}</p>
     <p class="hint">Manage users with <code>spine users add NAME --role viewer|operator|admin</code> (prints a token once), <code>spine users list</code> and <code>spine users remove NAME</code>. Serving a non-loopback address (<code>--addr 0.0.0.0:8765</code>) requires users; add <code>--tls-cert/--tls-key</code> for HTTPS and <code>--read-only</code> for a view-only dashboard.</p></section></div>`;
   $$("[data-rm]").forEach(b => b.onclick = async () => { if (!confirm(`Stop supervising ${b.dataset.rm}?`)) return; try { await send("DELETE", `/api/admin/repos/${enc(b.dataset.rm)}`); toast("Removed", "ok") } catch (x) { toast(esc(x.message), "bad") } });
   const ar = $("#addr"); if (ar) ar.onsubmit = async e => { e.preventDefault(); try { await send("POST", "/api/admin/repos", { path: ar.path.value, name: ar.name.value }); toast("Added; its controller is starting", "ok"); ar.reset() } catch (x) { toast(esc(x.message), "bad") } };
-  settingsConfig(rn); settingsNotify(); settingsTemplates(rn);
+  settingsConfig(rn); settingsPi(rn); settingsNotify(); settingsTemplates(rn);
 }
 async function settingsConfig(rn) {
   const c = await get(`/api/repos/${enc(rn)}/config`).catch(e => ({ error: e.message }));
@@ -987,14 +988,140 @@ async function settingsConfig(rn) {
     e.preventDefault(); $("#cfErr").textContent = "";
     const settings = { agent: f.agent.value, parallel: +f.parallel.value, base: f.base.value, max_attempts: +f.max_attempts.value, max_patch_rounds: +f.max_patch_rounds.value,
       max_tokens: +f.max_tokens.value, per_run_timeout: f.per_run_timeout.value, max_wall_clock: f.max_wall_clock.value, supervisor: f.supervisor.value };
-    try { const j = await send("PUT", `/api/repos/${enc(rn)}/config`, { settings }); toast(j.changed ? (j.restarted ? "Saved; controller restarted" : "Saved") : "No changes", "ok"); settingsConfig(rn) } catch (x) { $("#cfErr").textContent = x.message }
+    try { const j = await send("PUT", `/api/repos/${enc(rn)}/config`, { settings }); savedToast(j); settingsConfig(rn) } catch (x) { $("#cfErr").textContent = x.message }
   };
   const rb = $("#rawBtn");
   if (rb) rb.onclick = () => dialog(`<h2>.spine/config.yaml</h2><form class="f" id="rawf"><textarea name="raw" style="min-height:360px;font-family:ui-monospace,monospace;font-size:12px">${esc(c.raw || "")}</textarea><div class="err" id="rawErr"></div>
     <div class="actions"><button class="btn primary">Validate and save</button><button type="button" class="btn" id="dc">Cancel</button></div></form>`, b => {
     $("#dc", b).onclick = closeDialog;
-    $("#rawf", b).onsubmit = async e => { e.preventDefault(); try { await send("PUT", `/api/repos/${enc(rn)}/config`, { raw: e.target.raw.value }); closeDialog(); toast("Saved", "ok"); settingsConfig(rn) } catch (x) { $("#rawErr", b).textContent = x.message } };
+    $("#rawf", b).onsubmit = async e => { e.preventDefault(); try { const j = await send("PUT", `/api/repos/${enc(rn)}/config`, { raw: e.target.raw.value }); closeDialog(); savedToast(j); settingsConfig(rn) } catch (x) { $("#rawErr", b).textContent = x.message } };
   });
+}
+function savedToast(j) {
+  if (j.restart_error) toast("Saved, but the controller did not restart: " + esc(j.restart_error), "bad");
+  else toast(j.changed ? (j.restarted ? "Saved; controller restarted" : "Saved") : "No changes", "ok");
+  if (j.uncommitted) toast("<code>.spine/config.yaml</code> has uncommitted changes: tasks can't integrate into a checked-out base branch until you commit it.", "warn");
+}
+
+// - Pi agent: install, model server, adapter -
+const KEY_LABEL = { none: "no key", unused: "no key needed", env: "from the environment", literal: "stored in the file", command: "from a command" };
+async function settingsPi(rn) {
+  const p = await get(`/api/repos/${enc(rn)}/pi`).catch(e => ({ error: e.message }));
+  if (route.view !== "settings" || !$("#pi")) return;
+  $("#pi").className = "";
+  if (p.error) { $("#pi").innerHTML = `<p class="fail">${esc(p.error)}</p>`; return }
+  const admin = can("admin"), ro = admin ? "" : "disabled", a = p.adapter, c = a.container, provs = p.models.providers;
+  const modelIds = provs.flatMap(x => x.models.map(m => x.name + "/" + m.id));
+  $("#pi").innerHTML = `<p class="hint">Local models through <a href="https://www.npmjs.com/package/${esc(p.package)}" target="_blank" rel="noopener">Pi</a>. Run it in a container: Pi has no sandbox and never asks for approval.</p>
+   <div id="piStat"></div>
+   ${admin ? `<h3 class="sec">1. Install Pi ${esc(a.version)}</h3><div class="actions" id="piInst"></div><div id="piJob"></div>` : ""}
+   <h3 class="sec">${admin ? "2. " : ""}Model server</h3>
+   <p class="hint"><code>${esc(p.models.path)}</code>: shared by every repository on this machine; used from the next agent run, with no restart.</p>
+   ${p.models.error ? `<p class="fail">${esc(p.models.error)}</p>` : ""}
+   ${provs.length ? `<table><tr><th>Provider</th><th>Server</th><th>API key</th><th>Models</th><th></th></tr>${provs.map(x => `<tr><td>${esc(x.name)}</td><td class="mono">${esc(x.base_url)}</td><td>${esc(KEY_LABEL[x.key.kind])}${x.key.env ? ` <code>$${esc(x.key.env)}</code>` : ""}</td><td class="mono">${x.models.map(m => esc(m.id)).join("<br>")}</td>
+     <td>${admin ? `<button class="btn small" data-pedit="${esc(x.name)}">Edit</button> <button class="btn small danger" data-pdel="${esc(x.name)}">Remove</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">No model server configured yet.</p>`}
+   ${admin ? `<form class="f" id="pmf" style="margin-top:10px"></form>` : ""}
+   <h3 class="sec">${admin ? "3. " : ""}Adapter</h3>
+   <p class="hint"><code>adapters.${esc(a.name)}</code> in this repository's <code>.spine/config.yaml</code>; ${p.restart ? "saving restarts this repository's controller" : "restart <code>spine controller</code> to apply changes"}.</p>
+   <form class="f" id="paf"><div class="row3"><label>Pi version (pinned exactly)<input name="version" value="${esc(a.version)}" required ${ro}></label>
+     <label>Model (provider/id)<input name="model" list="piModels" value="${esc(a.model || modelIds[0] || "")}" ${ro}><datalist id="piModels">${modelIds.map(m => `<option value="${esc(m)}">`).join("")}</datalist></label>
+     <label>Max turns per run<input name="max_turns" type="number" min="0" value="${a.max_turns || ""}" placeholder="80" ${ro}></label></div>
+    <div class="row3"><label>Tool timeout<input name="tool_timeout" value="${esc(a.tool_timeout || "")}" placeholder="10m" ${ro}></label></div>
+    <label class="check"><input type="checkbox" name="boxed" ${c || admin ? "checked" : ""} ${ro}> Run each agent in a fresh container (recommended)</label>
+    <div class="row3" id="piBox"><label>Image<input name="image" value="${esc(p.container.image)}" ${ro}></label>
+     <label>Runtime<select name="runtime" ${ro}>${["docker", "podman"].map(x => `<option ${x === p.container.runtime ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+     <label>Network<input name="network" value="${esc(c?.network || "")}" placeholder="host" ${ro}></label>
+     <label>Extra run arguments<input name="args" value="${esc((c?.args || []).join(" "))}" placeholder="--memory 8g --cpus 4" ${ro}></label></div>
+    <label class="check"><input type="checkbox" name="make_default" ${a.default ? "checked disabled" : ""} ${ro}> Use Pi as this repository's default agent${a.default ? "" : ` (now ${esc(a.default_agent)})`}</label>
+    ${admin ? `<div class="actions"><button class="btn primary">Save adapter</button></div>` : ""}<div class="err" id="pafErr"></div></form>
+   ${admin ? `<h3 class="sec">4. Check</h3><div class="actions"><button class="btn" id="piChk">Check Pi</button><span id="piChkOut" class="hint"></span></div>` : ""}`;
+  piStatusRender(rn, p);
+  const af = $("#paf"), box = () => { $("#piBox").hidden = !af.boxed.checked }; box(); af.boxed.onchange = box;
+  af.onsubmit = async e => {
+    e.preventDefault(); $("#pafErr").textContent = "";
+    if (!af.boxed.checked && !confirm("Without a container Pi runs directly on this machine, with no sandbox and no approvals. Continue?")) return;
+    const body = { version: af.version.value, model: af.model.value, tool_timeout: af.tool_timeout.value, max_turns: +af.max_turns.value, make_default: af.make_default.checked && !a.default,
+      container: af.boxed.checked ? { image: af.image.value, runtime: af.runtime.value, network: af.network.value, args: af.args.value.split(/\s+/).filter(Boolean) } : null };
+    try { savedToast(await send("PUT", `/api/repos/${enc(rn)}/pi/adapter`, body)); settingsPi(rn); settingsConfig(rn) } catch (x) { $("#pafErr").textContent = x.message }
+  };
+  if (!admin) return;
+  piProviderForm(rn, p, provs.length === 1 ? provs[0] : null);
+  $$("[data-pedit]").forEach(b => b.onclick = () => piProviderForm(rn, p, provs.find(x => x.name === b.dataset.pedit)));
+  $$("[data-pdel]").forEach(b => b.onclick = async () => { if (!confirm(`Remove provider ${b.dataset.pdel} from models.json? This affects every repository on this machine.`)) return; try { await send("DELETE", `/api/repos/${enc(rn)}/pi/models/${enc(b.dataset.pdel)}`); toast("Removed", "ok"); settingsPi(rn) } catch (x) { toast(esc(x.message), "bad") } });
+  $("#piChk").onclick = async e => {
+    const out = $("#piChkOut"); e.target.disabled = true; out.textContent = "Checking…";
+    try {
+      const r = await send("POST", `/api/repos/${enc(rn)}/pi/check`, {});
+      out.innerHTML = r.ok ? `<span class="pass">✓ ${esc(r.message)}</span>${r.contained ? " The container check covers the version, not the model: use List models above to test the server." : ""}` : `<span class="fail">✗ ${esc(r.error)}</span>`;
+    } catch (x) { out.innerHTML = `<span class="fail">${esc(x.message)}</span>` } finally { e.target.disabled = false }
+  };
+  piPoll(rn);
+}
+function piStatusRender(rn, p) {
+  const h = p.host, c = p.container, a = p.adapter, boxed = !!a.container;
+  const mark = (ok, warn) => ok ? `<span class="pass">✓</span>` : warn ? `<span class="fail">✗</span>` : `<span class="muted">○</span>`;
+  const hostRow = h.version ? (h.version === a.version.replace(/^v/, "") ? `pi ${esc(h.version)} at <code>${esc(h.path)}</code>` : `<span class="fail">pi ${esc(h.version)} at <code>${esc(h.path)}</code>, but the adapter pins ${esc(a.version)}</span>`) : h.path ? `<span class="fail">${esc(h.error || "pi --version failed")}</span>` : "not installed";
+  const provs = p.models.providers, nModels = provs.reduce((n, x) => n + x.models.length, 0);
+  $("#piStat").innerHTML = `<table>
+   <tr><td>${mark(c.image_found, boxed && !c.image_found)}</td><td>Container image</td><td><code>${esc(c.image)}</code> ${c.image_found ? "is built" : c.runtime_found ? "is not built" : `needs ${esc(c.runtime)}, which is not on the dashboard's PATH`}${c.error ? ` <span class="fail">${esc(c.error)}</span>` : ""}${boxed ? "" : ` <span class="muted">(this adapter doesn't use a container)</span>`}</td></tr>
+   <tr><td>${mark(h.version === a.version.replace(/^v/, ""), !boxed || (h.version && h.version !== a.version.replace(/^v/, "")))}</td><td>On this machine</td><td>${hostRow}${h.node ? ` <span class="muted">· Node ${esc(h.node)}</span>` : ""}${h.node_ok === false ? ` <span class="warn">(Pi needs ${esc(p.min_node)} or newer)</span>` : ""}</td></tr>
+   <tr><td>${mark(nModels > 0 && a.model, p.models.error)}</td><td>Model</td><td>${a.model ? `<code>${esc(a.model)}</code>` : "none selected"} <span class="muted">· ${provs.length} provider${provs.length === 1 ? "" : "s"}, ${nModels} model${nModels === 1 ? "" : "s"} in models.json</span></td></tr>
+   <tr><td>${mark(a.default)}</td><td>Default agent</td><td>${a.default ? `Pi (<code>${esc(a.name)}</code>)` : `<code>${esc(a.default_agent)}</code>; tasks can still pick Pi`}</td></tr></table>
+   ${(p.warnings || []).map(w => `<p class="warn">${esc(w)}</p>`).join("")}`;
+  const inst = $("#piInst"); if (!inst) return;
+  const npmBlock = !h.npm ? "npm is not on the dashboard's PATH" : h.node_ok === false ? `needs Node ${p.min_node} or newer` : "";
+  inst.innerHTML = `<button class="btn ${boxed || !h.version ? "primary" : ""}" data-pinst="image" ${c.runtime_found ? "" : "disabled"}>${c.image_found ? "Rebuild" : "Build"} container image</button>
+    <button class="btn" data-pinst="npm" ${npmBlock ? "disabled" : ""}>${h.version ? "Reinstall" : "Install"} on this machine with npm</button>${npmBlock ? `<span class="hint">${esc(npmBlock)}</span>` : ""}`;
+  $$("[data-pinst]").forEach(b => b.onclick = async () => {
+    const npm = b.dataset.pinst === "npm";
+    if (npm && !confirm(`Run npm install -g ${p.package}@${a.version} on this machine?`)) return;
+    try { await send("POST", `/api/repos/${enc(rn)}/pi/install`, { method: b.dataset.pinst }); piPoll(rn) } catch (x) { toast(esc(x.message), "bad") }
+  });
+}
+let piPolling = null;
+async function piPoll(rn) {
+  clearTimeout(piPolling);
+  const j = await get("/api/pi/install").catch(() => null);
+  const el = $("#piJob"); if (route.view !== "settings" || !el || !j || j.none) return;
+  const wasRunning = el.dataset.running === "1";
+  el.dataset.running = j.running ? "1" : "";
+  el.innerHTML = `<p>${j.running ? `<span class="muted">Installing <code>${esc(j.target)}</code>… this continues if you leave the page.</span>` : j.ok ? `<span class="pass">✓ <code>${esc(j.target)}</code> installed</span>` : `<span class="fail">✗ ${esc(j.target)}: ${esc(j.error)}</span>`}</p>
+    <details ${j.running || !j.ok ? "open" : ""}><summary class="hint">Output</summary><pre class="log" style="max-height:260px;overflow:auto">${esc(j.log)}</pre></details>`;
+  const lg = $("pre", el); if (lg) lg.scrollTop = lg.scrollHeight;
+  $$("[data-pinst]").forEach(b => b.disabled = j.running || b.disabled);
+  if (j.running) { piPolling = setTimeout(() => piPoll(rn), 1500); return }
+  if (wasRunning) { const p = await get(`/api/repos/${enc(rn)}/pi`).catch(() => null); if (p && !p.error && $("#piStat")) piStatusRender(rn, p) }
+}
+function piProviderForm(rn, p, cur) {
+  const f = $("#pmf"), key = cur?.key?.kind;
+  const row = (m = {}) => `<div class="row3" data-mrow><label>Model id<input name="mid" list="piFound" value="${esc(m.id || "")}" placeholder="qwen3-coder-30b"></label>
+    <label>Context window<input name="mctx" type="number" min="0" value="${m.context_window || ""}" placeholder="128000 (Pi's default)"></label>
+    <label>Max output tokens<input name="mmax" type="number" min="0" value="${m.max_tokens || ""}" placeholder="16384 (Pi's default)"></label></div>`;
+  f.innerHTML = `<div class="row3"><label>Provider name<input name="name" required value="${esc(cur?.name || "local")}" ${cur ? "readonly" : ""}></label>
+     <label>Server URL<input name="base_url" required value="${esc(cur?.base_url || "")}" placeholder="http://127.0.0.1:8000/v1"></label>
+     <label>API<select name="api">${p.apis.map(x => `<option ${x === (cur?.api || "openai-completions") ? "selected" : ""}>${x}</option>`).join("")}</select></label></div>
+    <label>API key <input name="api_key" autocomplete="off" placeholder="${key && key !== "none" && key !== "unused" ? "keep the current key (" + esc(KEY_LABEL[key]) + ")" : "$MY_SERVER_KEY, or leave blank if the server needs none"}"></label>
+    <p class="hint">Prefer <code>$NAME</code>: the key then stays out of the file and of containers' copies of it, and the adapter must pass that variable. A literal key is copied into each container run. Set the context window to what your server was started with: Pi assumes 128000 otherwise.</p>
+    <div id="pmRows">${(cur?.models?.length ? cur.models : [{}]).map(row).join("")}</div><datalist id="piFound"></datalist>
+    <div class="actions"><button class="btn primary">Save provider</button><button type="button" class="btn" id="pmAdd">Add model</button><button type="button" class="btn" id="pmList">List models from the server</button>${cur ? `<button type="button" class="btn" id="pmNew">New provider</button>` : ""}<span class="hint" id="pmOut"></span></div><div class="err" id="pmErr"></div>`;
+  $("#pmAdd").onclick = () => $("#pmRows").insertAdjacentHTML("beforeend", row());
+  const nw = $("#pmNew"); if (nw) nw.onclick = () => piProviderForm(rn, p, null);
+  $("#pmList").onclick = async () => {
+    const out = $("#pmOut"); out.textContent = "Asking the server…";
+    try {
+      const r = await send("POST", `/api/repos/${enc(rn)}/pi/discover`, { base_url: f.base_url.value, api_key: f.api_key.value });
+      if (!r.ok) { out.innerHTML = `<span class="fail">${esc(r.error)}</span>`; return }
+      $("#piFound").innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join("");
+      const blank = $$("[name=mid]", f).filter(i => !i.value);
+      if (r.models.length === 1 && blank.length) blank[0].value = r.models[0];
+      out.innerHTML = `<span class="pass">✓ reachable</span>, ${r.models.length} model${r.models.length === 1 ? "" : "s"}: ${esc(trunc(r.models.join(", "), 120))}`;
+    } catch (x) { out.innerHTML = `<span class="fail">${esc(x.message)}</span>` }
+  };
+  f.onsubmit = async e => {
+    e.preventDefault(); $("#pmErr").textContent = "";
+    const models = $$("[data-mrow]", f).map(r => ({ id: $("[name=mid]", r).value, context_window: +$("[name=mctx]", r).value, max_tokens: +$("[name=mmax]", r).value })).filter(m => m.id.trim());
+    try { await send("PUT", `/api/repos/${enc(rn)}/pi/models`, { name: f.name.value, base_url: f.base_url.value, api: f.api.value, api_key: f.api_key.value, models }); toast("Saved models.json", "ok"); settingsPi(rn) } catch (x) { $("#pmErr").textContent = x.message }
+  };
 }
 async function settingsNotify() {
   if (!me.home) return;

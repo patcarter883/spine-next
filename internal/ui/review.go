@@ -531,7 +531,7 @@ func describeAdapters(cfg config.Config) []adapterInfo {
 				i.Label = "Pi " + a.Version + " · " + a.Model
 			}
 			if a.Container == nil {
-				i.Warning = "runs on this machine without a sandbox; give it a container in .spine/config.yaml"
+				i.Warning = "runs on this machine without a sandbox; give it a container under Settings, Pi agent"
 			}
 		case n == "claude":
 			i.Label = "Claude Code (ACP)"

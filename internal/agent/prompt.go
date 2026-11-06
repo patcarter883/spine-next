@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/repoctx"
 )
 
 // Prompt is built from typed inputs only (RFC §3.4): the worker never sees
@@ -165,12 +166,12 @@ func (p Prompt) renderSurvey() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "spine-task: %s\nspine-attempt: %d\nspine-round: %d\nspine-kind: survey\n\n", p.Task, p.Attempt, p.Round)
 	b.WriteString("# Task\n\nDescribe this repository for coding agents that will work in it. Write two files and change nothing else.\n\n")
-	b.WriteString("1. `.spine/modules.yaml` was derived from the code and its git history. For each module, set `label` (what it is, at most ten words) and, only where there is a real pitfall, `caveats` (at most two short sentences each: generated code, ordering constraints, files that must change together, slow tests). Do not change any other field, and do not add or remove modules.\n")
-	words := p.NotesTokens * 3 / 4
-	if words <= 0 {
-		words = 900
+	b.WriteString("1. `.spine/modules.yaml` was derived from the code and its git history. For each module, set `label` (what it is, at most ten words) and, only where there is a real pitfall, `caveats`: a YAML list of at most three strings, never a single string, each at most two short sentences (generated code, ordering constraints, files that must change together, slow tests). Quote any label or caveat that contains `: `. Do not change any other field, and do not add or remove modules.\n")
+	tokens := p.NotesTokens
+	if tokens <= 0 {
+		tokens = repoctx.DefaultNotesTokens
 	}
-	fmt.Fprintf(&b, "2. `.spine/context.md`: a short factual summary, at most about %d words. Facts only, as terse bullet lists under these headings: Build and test (the exact commands, including how to run one package's or file's tests), Layout (where things live), Conventions (naming, errors, logging, formatting the gates do not already enforce), No-go areas (generated files, vendored code, files never to edit). Verify each command by running it. No tutorials, no history, no restating what the code says.\n", words)
+	fmt.Fprintf(&b, "2. `.spine/context.md`: a short factual summary of at most %d bytes as `wc -c .spine/context.md` counts them (the gate's cap of %d tokens at 4 bytes each); aim for no more than %d. Facts only, as terse bullet lists under these headings: Build and test (the exact commands, including how to run one package's or file's tests), Layout (where things live), Conventions (naming, errors, logging, formatting the gates do not already enforce), No-go areas (generated files, vendored code, files never to edit). Verify each command by running it. No tutorials, no history, no restating what the code says.\n", tokens*4, tokens, tokens*4*9/10)
 	if strings.TrimSpace(p.Intent) != "" {
 		b.WriteString("\n# Focus\n\n" + strings.TrimSpace(p.Intent) + "\n")
 	}

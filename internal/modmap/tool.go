@@ -75,8 +75,8 @@ func (CheckTool) Run(ctx context.Context, inv tools.Invocation) (tools.Result, e
 	}
 	if !ok || strings.TrimSpace(string(nb)) == "" {
 		ds = append(ds, diagf("Missing", NotesPath, "%s is missing or empty", NotesPath))
-	} else if n := (len(strings.TrimSpace(string(nb))) + 3) / 4; n > args.NotesTokens {
-		ds = append(ds, diagf("TooLong", NotesPath, "%s is about %d tokens; the cap is %d: keep only facts an agent needs (commands, layout, conventions, no-go areas)", NotesPath, n, args.NotesTokens))
+	} else if size := len(strings.TrimSpace(string(nb))); (size+3)/4 > args.NotesTokens {
+		ds = append(ds, diagf("TooLong", NotesPath, "%s is %d bytes (about %d tokens); the cap is %d bytes (%d tokens): cut %d bytes, keeping only facts an agent needs (commands, layout, conventions, no-go areas)", NotesPath, size, (size+3)/4, args.NotesTokens*4, args.NotesTokens, size-args.NotesTokens*4))
 	}
 	res := tools.Result{Diagnostics: ds}
 	if len(ds) > 0 {

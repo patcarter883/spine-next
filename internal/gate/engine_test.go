@@ -52,10 +52,11 @@ type countTool struct {
 	runs  map[string]int
 	diags map[string][]tools.Diagnostic // by tree
 	dirs  bool
+	det   tools.Determinism
 }
 
 func (c *countTool) Spec() tools.Spec {
-	return tools.Spec{Name: c.name, Version: "1", Determinism: tools.Pure, NeedsDir: c.dirs, ReadOnly: true}
+	return tools.Spec{Name: c.name, Version: "1", Determinism: c.det, NeedsDir: c.dirs, ReadOnly: true}
 }
 func (c *countTool) Run(ctx context.Context, inv tools.Invocation) (tools.Result, error) {
 	c.runs[inv.Tree]++
@@ -155,5 +156,42 @@ func TestEvaluateErrors(t *testing.T) {
 	b, _ := json.Marshal(c.Gates["u"].Args)
 	if string(b) != `{"argv":["go","test"],"ok_exit":[0,5]}` || c.Gates["u"].Timeout.Minutes() != 2 || c.Baseline.Link[0] != "node_modules" {
 		t.Fatalf("%s %+v", b, c)
+	}
+}
+
+func TestEvaluateRerunsACachedFlakyFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	repo.Write(map[string]string{ConfigPath: "gates:\n  suite: {tool: t.suite, policy: baseline}\norder: [suite]\n", "f": "1"})
+	base := repo.Commit("base")
+	repo.Write(map[string]string{"f": "2"})
+	snap := repo.Commit("snap")
+	baseTree, snapTree := repo.Tree(base), repo.Tree(snap)
+
+	suite := &countTool{name: "t.suite", runs: map[string]int{}, dirs: true, det: tools.Hermetic, diags: map[string][]tools.Diagnostic{
+		baseTree: {d("debt")}, snapTree: {d("debt"), d("flake")},
+	}}
+	reg := tools.New(tools.Options{Cache: tools.NewMemCache()})
+	reg.MustRegister(suite)
+	e := &Engine{Reg: reg, ScratchDir: t.TempDir()}
+	eval := func() Verdict {
+		v, err := e.Evaluate(ctx, Request{Repo: repo.Dir, Commit: snap, Base: base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if v := eval(); v.Passed {
+		t.Fatalf("the flake should fail the first check: %+v", v)
+	}
+	suite.diags[snapTree] = []tools.Diagnostic{d("debt")}
+	if v := eval(); !v.Passed || v.Gates[0].Cached {
+		t.Fatalf("an unchanged tree whose cached result fails is run again: %+v", v)
+	}
+	if suite.runs[snapTree] != 2 || suite.runs[baseTree] != 1 {
+		t.Fatalf("only the branch reruns: %v", suite.runs)
+	}
+	if v := eval(); !v.Passed || !v.Gates[0].Cached || suite.runs[snapTree] != 2 {
+		t.Fatalf("a passing result is reused even with excused failures: %+v runs %v", v, suite.runs)
 	}
 }

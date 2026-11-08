@@ -147,3 +147,29 @@ func TestNormalizeMessage(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestRecheckRerunsCachedHermeticFailures(t *testing.T) {
+	ctx := context.Background()
+	reg := tools.New(tools.Options{Cache: tools.NewMemCache()})
+	suite, parser := newFake("t.suite", tools.Hermetic), newFake("t.parse", tools.Pure)
+	suite.exit, parser.exit = 1, 1
+	reg.MustRegister(suite)
+	reg.MustRegister(parser)
+	inv := tools.Invocation{Tree: "abc", Args: json.RawMessage(`{}`)}
+	reg.Invoke(ctx, "t.suite", inv)
+	if r, _ := reg.Invoke(ctx, "t.suite", inv); !r.Cached || suite.runs.Load() != 1 {
+		t.Fatalf("without recheck a failure is reused: cached=%v runs=%d", r.Cached, suite.runs.Load())
+	}
+	inv.Recheck = true
+	suite.exit = 0
+	if r, _ := reg.Invoke(ctx, "t.suite", inv); r.Cached || r.ExitCode != 0 || suite.runs.Load() != 2 {
+		t.Fatalf("a rechecked failure runs again: %+v runs=%d", r, suite.runs.Load())
+	}
+	if r, _ := reg.Invoke(ctx, "t.suite", inv); !r.Cached || suite.runs.Load() != 2 {
+		t.Fatalf("a pass is reused: cached=%v runs=%d", r.Cached, suite.runs.Load())
+	}
+	reg.Invoke(ctx, "t.parse", inv)
+	if r, _ := reg.Invoke(ctx, "t.parse", inv); !r.Cached || parser.runs.Load() != 1 {
+		t.Fatalf("a pure tool's failure is deterministic and stays cached: runs=%d", parser.runs.Load())
+	}
+}

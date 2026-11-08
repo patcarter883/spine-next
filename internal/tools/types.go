@@ -80,6 +80,9 @@ type Invocation struct {
 	Args        json.RawMessage
 	// Timeout overrides Spec.Timeout when positive.
 	Timeout time.Duration
+	// Recheck runs a Hermetic tool again instead of returning a cached
+	// failure: a test suite that failed once may pass on the same tree.
+	Recheck bool
 }
 
 // WorkDir returns the directory a NeedsDir tool must run in.

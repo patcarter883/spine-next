@@ -145,37 +145,47 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 			continue
 		}
 		args := gateArgs(g, req.Scope)
-		cur, err := e.Reg.Invoke(ctx, g.Tool, tools.Invocation{
-			Repo: req.Repo, Tree: tree, Commit: req.Commit, Base: req.Base, Args: args, Timeout: g.Timeout,
-			BaseKey: mbTree + " " + baseTree, Materialize: mats.for_(tree),
-		})
-		if err != nil {
-			return Verdict{}, fmt.Errorf("gate %s: %w", name, err)
-		}
-		gv := api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, ToolExitCode: cur.ExitCode,
-			Metrics: cur.Metrics, Cached: cur.Cached, Duration: cur.Duration, Artifacts: cur.Artifacts}
-		if g.Policy == api.BaselineRelative {
-			var base *tools.Result
-			if cur.ExitCode != 0 || hasErrors(cur.Diagnostics) || e.AlwaysBaseline {
-				b, err := e.Reg.Invoke(ctx, g.Tool, tools.Invocation{
-					Repo: req.Repo, Tree: baseTree, Commit: req.Base, Base: req.Base, Args: args, Timeout: g.Timeout,
-					BaseKey: baseTree + " " + baseTree, Materialize: mats.for_(baseTree),
-				})
-				if err != nil {
-					return Verdict{}, fmt.Errorf("gate %s (baseline): %w", name, err)
-				}
-				base = &b
-				for _, a := range b.Artifacts {
-					a.Name = "base-" + a.Name
-					gv.Artifacts = append(gv.Artifacts, a)
-				}
-				code := b.ExitCode
-				gv.BaseExitCode = &code
-				gv.Cached = gv.Cached && b.Cached
+		judge := func(recheck bool) (api.GateVerdict, bool, error) {
+			cur, err := e.Reg.Invoke(ctx, g.Tool, tools.Invocation{
+				Repo: req.Repo, Tree: tree, Commit: req.Commit, Base: req.Base, Args: args, Timeout: g.Timeout,
+				BaseKey: mbTree + " " + baseTree, Materialize: mats.for_(tree), Recheck: recheck,
+			})
+			if err != nil {
+				return api.GateVerdict{}, false, fmt.Errorf("gate %s: %w", name, err)
 			}
-			baselineVerdict(&gv, base, cur)
-		} else {
-			absoluteVerdict(&gv, cur)
+			gv := api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, ToolExitCode: cur.ExitCode,
+				Metrics: cur.Metrics, Cached: cur.Cached, Duration: cur.Duration, Artifacts: cur.Artifacts}
+			if g.Policy == api.BaselineRelative {
+				var base *tools.Result
+				if cur.ExitCode != 0 || hasErrors(cur.Diagnostics) || e.AlwaysBaseline {
+					b, err := e.Reg.Invoke(ctx, g.Tool, tools.Invocation{
+						Repo: req.Repo, Tree: baseTree, Commit: req.Base, Base: req.Base, Args: args, Timeout: g.Timeout,
+						BaseKey: baseTree + " " + baseTree, Materialize: mats.for_(baseTree),
+					})
+					if err != nil {
+						return api.GateVerdict{}, false, fmt.Errorf("gate %s (baseline): %w", name, err)
+					}
+					base = &b
+					for _, a := range b.Artifacts {
+						a.Name = "base-" + a.Name
+						gv.Artifacts = append(gv.Artifacts, a)
+					}
+					code := b.ExitCode
+					gv.BaseExitCode = &code
+					gv.Cached = gv.Cached && b.Cached
+				}
+				baselineVerdict(&gv, base, cur)
+			} else {
+				absoluteVerdict(&gv, cur)
+			}
+			return gv, cur.Cached, nil
+		}
+		gv, fromCache, err := judge(false)
+		if err == nil && fromCache && !gv.Passed() {
+			gv, _, err = judge(true)
+		}
+		if err != nil {
+			return Verdict{}, err
 		}
 		if len(gv.New) > MaxVerdictDiagnostics {
 			gv.New = gv.New[:MaxVerdictDiagnostics]

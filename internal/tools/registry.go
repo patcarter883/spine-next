@@ -237,7 +237,7 @@ func (r *Registry) Invoke(ctx context.Context, name string, inv Invocation) (Res
 		}
 		if res, ok, err := r.opts.Cache.Get(ctx, key); err != nil {
 			return Result{}, fmt.Errorf("tools: cache get: %w", err)
-		} else if ok {
+		} else if ok && !(inv.Recheck && e.spec.Determinism == Hermetic && (res.ExitCode != 0 || hasErrors(res.Diagnostics))) {
 			res.Cached = true
 			r.observe(Event{Tool: name, Key: key, Cached: true, Result: res})
 			return res, nil

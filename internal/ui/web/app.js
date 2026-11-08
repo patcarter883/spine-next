@@ -968,6 +968,7 @@ async function viewSettings() {
     ${can("admin") ? `<form class="f" id="addr" style="margin-top:10px"><div class="row"><label>Path to a git checkout<input name="path" required placeholder="/home/me/src/api"></label><label>Name (optional)<input name="name"></label></div><div><button class="btn">Add repository</button></div></form>` : ""}
     <p class="hint">Removing a repository stops its controller; its tasks and data stay in the repository.</p></section>` : ""}
    <section class="card"><h3>Repository configuration — ${esc(rn)}</h3><div id="cfg" class="muted">Loading…</div></section>
+   <section class="card"><h3>Agents — ${esc(rn)}</h3><div id="agents" class="muted">Loading…</div></section>
    <section class="card"><h3>Pi agent — ${esc(rn)}</h3><div id="pi" class="muted">Loading…</div></section>
    <section class="card"><h3>Notifications</h3><div id="ntf" class="muted">${me.home ? "Loading…" : "Not available."}</div></section>
    <section class="card"><h3>Templates</h3><div id="tpl" class="muted">Loading…</div></section>
@@ -975,7 +976,7 @@ async function viewSettings() {
     <p class="hint">Manage users with <code>spine users add NAME --role viewer|operator|admin</code> (prints a token once), <code>spine users list</code> and <code>spine users remove NAME</code>. Serving a non-loopback address (<code>--addr 0.0.0.0:8765</code>) requires users; add <code>--tls-cert/--tls-key</code> for HTTPS and <code>--read-only</code> for a view-only dashboard.</p></section></div>`;
   $$("[data-rm]").forEach(b => b.onclick = async () => { if (!confirm(`Stop supervising ${b.dataset.rm}?`)) return; try { await send("DELETE", `/api/admin/repos/${enc(b.dataset.rm)}`); toast("Removed", "ok") } catch (x) { toast(esc(x.message), "bad") } });
   const ar = $("#addr"); if (ar) ar.onsubmit = async e => { e.preventDefault(); try { await send("POST", "/api/admin/repos", { path: ar.path.value, name: ar.name.value }); toast("Added; its controller is starting", "ok"); ar.reset() } catch (x) { toast(esc(x.message), "bad") } };
-  settingsConfig(rn); settingsPi(rn); settingsNotify(); settingsTemplates(rn);
+  settingsConfig(rn); settingsAgents(rn); settingsPi(rn); settingsNotify(); settingsTemplates(rn);
 }
 async function settingsConfig(rn) {
   const c = await get(`/api/repos/${enc(rn)}/config`).catch(e => ({ error: e.message }));
@@ -991,8 +992,7 @@ async function settingsConfig(rn) {
     <div id="svLLM"><div class="row"><label>Supervisor LLM provider<select name="sv_provider" ${ro}><option value="">Anthropic API</option>${svProviders.map(p => `<option value="${esc(p.name)}" ${p.name === s.supervisor_provider ? "selected" : ""}>${esc(p.name)} (${esc(p.base_url)})</option>`).join("")}${s.supervisor_provider && !svProviders.some(p => p.name === s.supervisor_provider) ? `<option value="${esc(s.supervisor_provider)}" selected>${esc(s.supervisor_provider)} (not in models.json)</option>` : ""}</select></label>
      <label>Supervisor LLM model<input name="sv_model" list="svModels" value="${esc(s.supervisor_model || "")}" ${ro}><datalist id="svModels"></datalist></label></div>
      <p class="hint">Decides what to do after a failed round. It only gets a task summary and has no tools; if the call fails, the rules decide. Other providers come from Pi's <code>models.json</code> (Settings, Pi agent) and must use <code>openai-completions</code>.</p></div>
-    ${ro ? "" : `<div class="actions"><button class="btn primary">Save settings</button><button type="button" class="btn" id="rawBtn">Edit YAML…</button></div>`}<div class="err" id="cfErr"></div></form>
-    <details><summary class="hint">Agents</summary><table>${(c.adapters || []).map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.label)}</td><td class="mono">${esc(a.command)}</td><td class="warn">${esc(a.warning || "")}</td></tr>`).join("")}</table></details>`;
+    ${ro ? "" : `<div class="actions"><button class="btn primary">Save settings</button><button type="button" class="btn" id="rawBtn">Edit YAML…</button></div>`}<div class="err" id="cfErr"></div></form>`;
   const f = $("#cf");
   const svSync = () => {
     $("#svLLM").hidden = f.supervisor.value !== "llm";
@@ -1011,6 +1011,43 @@ async function settingsConfig(rn) {
     <div class="actions"><button class="btn primary">Validate and save</button><button type="button" class="btn" id="dc">Cancel</button></div></form>`, b => {
     $("#dc", b).onclick = closeDialog;
     $("#rawf", b).onsubmit = async e => { e.preventDefault(); try { const j = await send("PUT", `/api/repos/${enc(rn)}/config`, { raw: e.target.raw.value }); closeDialog(); savedToast(j); settingsConfig(rn) } catch (x) { $("#rawErr", b).textContent = x.message } };
+  });
+}
+async function settingsAgents(rn) {
+  const j = await get(`/api/repos/${enc(rn)}/agents`).catch(e => ({ error: e.message }));
+  const el = $("#agents"); if (route.view !== "settings" || !el) return;
+  el.className = "";
+  if (j.error) { el.innerHTML = `<p class="fail">${esc(j.error)}</p>`; return }
+  const admin = can("admin"), src = a => a.in_file ? (a.builtin ? "built-in, changed in config.yaml" : "config.yaml") : "built-in";
+  el.innerHTML = `<p class="hint"><code>adapters</code> in <code>${esc(j.path)}</code>; ${j.restart ? "saving restarts this repository's controller" : "restart <code>spine controller</code> to apply changes"}. Built-in agents (claude, pi) can be changed or reset, not removed.</p>
+   <table><tr><th>Name</th><th>Agent</th><th>Defined</th><th>Unfinished tasks</th><th></th></tr>${j.agents.map(a => `<tr><td><b>${esc(a.name)}</b>${a.default ? ` <span class="badge">default</span>` : ""}</td>
+     <td>${esc(a.label)}<div class="mono muted">${esc(a.command)}</div>${a.warning ? `<div class="warn">${esc(a.warning)}</div>` : ""}</td><td>${esc(src(a))}</td>
+     <td>${a.tasks.length ? `<span title="${esc(a.tasks.join(", "))}">${a.tasks.length}</span>` : `<span class="muted">0</span>`}</td>
+     <td style="white-space:nowrap">${admin ? `<button class="btn small" data-aedit="${esc(a.name)}">Edit</button>${a.in_file ? ` <button class="btn small danger" data-adel="${esc(a.name)}" ${!a.builtin && (a.default || a.tasks.length) ? `disabled title="${a.default ? "the default agent" : "unfinished tasks run on it"}"` : ""}>${a.builtin ? "Reset" : "Remove"}</button>` : ""}` : ""}</td></tr>`).join("")}</table>
+   ${admin ? `<div class="actions"><button class="btn" id="aadd">+ Add agent</button></div>` : ""}`;
+  if (!admin) return;
+  const saved = r => { savedToast(r); settingsAgents(rn); settingsConfig(rn); settingsPi(rn) };
+  const edit = a => dialog(`<h2>${a ? `Agent ${esc(a.name)}` : "New agent"}</h2><form class="f" id="agf">
+     <label>Name<input name="name" required value="${esc(a?.name || "")}" ${a ? "readonly" : ""} placeholder="glm"></label>
+     <label>Adapter YAML<textarea name="yaml" style="min-height:260px;font-family:ui-monospace,monospace;font-size:12px" placeholder="protocol: pi-rpc
+version: 1.5.0
+model: openrouter/z-ai/glm-5.3-flash
+container:
+  image: spine-pi:1.5.0">${esc(a?.yaml || "")}</textarea></label>
+     <p class="hint">The fields under <code>adapters.${esc(a?.name || "NAME")}</code>.${a && !a.in_file ? " Built-in: anything set here overrides its defaults." : ""}</p>
+     <div class="err" id="agErr"></div><div class="actions"><button class="btn primary">Validate and save</button><button type="button" class="btn" id="agc">Cancel</button></div></form>`, b => {
+    $("#agc", b).onclick = closeDialog;
+    $("#agf", b).onsubmit = async e => {
+      e.preventDefault(); const f = e.target;
+      try { const r = await send("PUT", `/api/repos/${enc(rn)}/agents/${enc(f.name.value.trim())}`, { yaml: f.yaml.value }); closeDialog(); saved(r) } catch (x) { $("#agErr", b).textContent = x.message }
+    };
+  });
+  $$("[data-aedit]", el).forEach(b => b.onclick = () => edit(j.agents.find(a => a.name === b.dataset.aedit)));
+  $("#aadd", el).onclick = () => edit(null);
+  $$("[data-adel]", el).forEach(b => b.onclick = async () => {
+    const a = j.agents.find(x => x.name === b.dataset.adel);
+    if (!confirm(a.builtin ? `Reset ${a.name} to its built-in defaults?` : `Remove agent ${a.name} from config.yaml?`)) return;
+    try { saved(await send("DELETE", `/api/repos/${enc(rn)}/agents/${enc(a.name)}`)) } catch (x) { toast(esc(x.message), "bad") }
   });
 }
 function savedToast(j) {
@@ -1117,7 +1154,7 @@ function piProviderForm(rn, p, cur) {
      <label>Server URL<input name="base_url" required value="${esc(cur?.base_url || "")}" placeholder="http://127.0.0.1:8000/v1"></label>
      <label>API<select name="api">${p.apis.map(x => `<option ${x === (cur?.api || "openai-completions") ? "selected" : ""}>${x}</option>`).join("")}</select></label></div>
     <label>API key <input name="api_key" autocomplete="off" placeholder="${key && key !== "none" && key !== "unused" ? "keep the current key (" + esc(KEY_LABEL[key]) + ")" : "$MY_SERVER_KEY, or leave blank if the server needs none"}"></label>
-    <p class="hint">Prefer <code>$NAME</code>: the key then stays out of the file and of containers' copies of it, and the adapter must pass that variable. A literal key is copied into each container run. Set the context window to what your server was started with: Pi assumes 128000 otherwise.</p>
+    <p class="hint">Prefer <code>$NAME</code>: the key then stays out of the file and of containers' copies of it, and Spine passes that variable to agents using this provider. A literal key is copied into each container run. Set the context window to what your server was started with: Pi assumes 128000 otherwise.</p>
     <div id="pmRows">${(cur?.models?.length ? cur.models : [{}]).map(row).join("")}</div><datalist id="piFound"></datalist>
     <div class="actions"><button class="btn primary">Save provider</button><button type="button" class="btn" id="pmAdd">Add model</button><button type="button" class="btn" id="pmList">List models from the server</button>${cur ? `<button type="button" class="btn" id="pmNew">New provider</button>` : ""}<span class="hint" id="pmOut"></span></div><div class="err" id="pmErr"></div>`;
   $("#pmAdd").onclick = () => $("#pmRows").insertAdjacentHTML("beforeend", row());

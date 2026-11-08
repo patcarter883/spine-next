@@ -182,3 +182,55 @@ func TestSupervisorProvider(t *testing.T) {
 		t.Fatalf("%+v\n%s", c.Supervisor, out)
 	}
 }
+
+func TestAdapterEdits(t *testing.T) {
+	src := []byte(`# top
+agent: claude
+adapters:
+  glm:
+    protocol: pi-rpc # pinned
+    version: 1.5.0
+parallel: 2
+`)
+	y, err := AdapterYAML(src, "glm")
+	if err != nil || !strings.Contains(y, "version: 1.5.0") || !strings.Contains(y, "# pinned") {
+		t.Fatalf("yaml %q %v", y, err)
+	}
+	if y, _ := AdapterYAML(src, "claude"); y != "" {
+		t.Fatalf("built-in not in the file: %q", y)
+	}
+	out, err := ApplyAdapter(src, "glm", "protocol: pi-rpc\nversion: 1.5.0\nmodel: openrouter/m\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Parse(out)
+	if err != nil || c.Adapters["glm"].Model != "openrouter/m" || c.Parallel != 2 || !strings.Contains(string(out), "# top") {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if out, err = ApplyAdapter(out, "local", "protocol: pi-rpc\nversion: 1.5.0\n"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := Parse(out); c.Adapters["local"].Protocol != "pi-rpc" {
+		t.Fatal("new adapter missing")
+	}
+	for _, bad := range []string{"protocol: pi-rpc\n", "- a\n", "protocol: [\n"} {
+		if _, err := ApplyAdapter(src, "glm", bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if _, err := ApplyAdapter(src, "bad name", "argv: [x]\n"); err == nil {
+		t.Error("accepted a bad name")
+	}
+	if out, err = RemoveAdapter(out, "local"); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := Parse(out); c.Adapters["local"].Name != "" || c.Adapters["glm"].Name == "" {
+		t.Fatalf("remove: %+v", c.Adapters)
+	}
+	if _, err := RemoveAdapter(out, "claude"); err == nil {
+		t.Error("removed an adapter the file doesn't define")
+	}
+	if _, err := RemoveAdapter([]byte("agent: glm\nadapters:\n  glm: {argv: [x]}\n"), "glm"); err == nil {
+		t.Error("removed the default agent")
+	}
+}

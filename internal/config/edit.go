@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -204,4 +205,86 @@ func deletePath(node *yaml.Node, parts ...string) {
 		}
 		node = child
 	}
+}
+
+// AdapterYAML returns adapters.<name> as the file writes it, comments
+// included, or "" when the file does not define it.
+func AdapterYAML(src []byte, name string) (string, error) {
+	_, root, err := parseDoc(src)
+	if err != nil {
+		return "", err
+	}
+	n := child(child(root, "adapters"), name)
+	if n == nil {
+		return "", nil
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(n); err != nil {
+		return "", err
+	}
+	enc.Close()
+	return buf.String(), nil
+}
+
+// ApplyAdapter replaces adapters.<name> with a YAML mapping, keeping the rest
+// of the file, and validates the result with Parse.
+func ApplyAdapter(src []byte, name, block string) ([]byte, error) {
+	if !adapterNameRe.MatchString(name) {
+		return nil, fmt.Errorf("config: agent name %q: use letters, digits, '-', '_' or '.'", name)
+	}
+	var b yaml.Node
+	if err := yaml.Unmarshal([]byte(block), &b); err != nil {
+		return nil, fmt.Errorf("config: adapters.%s: %w", name, err)
+	}
+	if len(b.Content) != 1 || b.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("config: adapters.%s must be a mapping of the adapter's fields", name)
+	}
+	doc, root, err := parseDoc(src)
+	if err != nil {
+		return nil, err
+	}
+	as := child(root, "adapters")
+	if as == nil {
+		as = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "adapters"}, as)
+	}
+	if n := child(as, name); n != nil {
+		*n = *b.Content[0]
+	} else {
+		as.Content = append(as.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, b.Content[0])
+	}
+	return encodeDoc(doc)
+}
+
+// RemoveAdapter deletes adapters.<name>; a built-in agent goes back to its
+// defaults.
+func RemoveAdapter(src []byte, name string) ([]byte, error) {
+	doc, root, err := parseDoc(src)
+	if err != nil {
+		return nil, err
+	}
+	if child(child(root, "adapters"), name) == nil {
+		return nil, fmt.Errorf("config: adapters.%s is not in %s", name, Path)
+	}
+	deletePath(root, "adapters", name)
+	if as := child(root, "adapters"); as != nil && len(as.Content) == 0 {
+		deletePath(root, "adapters")
+	}
+	return encodeDoc(doc)
+}
+
+var adapterNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
+
+func child(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for j := 0; j+1 < len(node.Content); j += 2 {
+		if node.Content[j].Value == key {
+			return node.Content[j+1]
+		}
+	}
+	return nil
 }

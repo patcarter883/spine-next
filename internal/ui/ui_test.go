@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/inbox"
 	"github.com/patcarter883/spine-next/internal/storage"
 )
@@ -190,5 +192,60 @@ func TestCreateTask(t *testing.T) {
 	json.NewDecoder(r2.Body).Decode(&d)
 	if d["base"] != "main" || d["agent"] != "claude" || d["max_attempts"].(float64) != 2 {
 		t.Fatalf("defaults %v", d)
+	}
+}
+
+func TestAgentsEditing(t *testing.T) {
+	a := newRepo(t, "exists")
+	path := t.TempDir()
+	os.MkdirAll(filepath.Join(path, ".spine"), 0o755)
+	cfgPath := filepath.Join(path, config.Path)
+	os.WriteFile(cfgPath, []byte("agent: glm\nadapters:\n  glm:\n    protocol: pi-rpc\n    version: 1.5.0\n"), 0o644)
+	src := SourceFunc(func(context.Context) []Repo {
+		return []Repo{{Name: "alpha", Path: path, State: "running", Store: a.ro, InboxDir: a.inbox}}
+	})
+	srv := httptest.NewServer((&Server{Source: src}).Handler())
+	defer srv.Close()
+	do := func(method, p, body string) (int, map[string]any) {
+		req, _ := http.NewRequest(method, srv.URL+p, strings.NewReader(body))
+		req.Header.Set("X-Spine", "1")
+		req.Header.Set("Content-Type", "application/json")
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		return r.StatusCode, m
+	}
+	_, m := do("GET", "/api/repos/alpha/agents", "")
+	rows := map[string]map[string]any{}
+	for _, x := range m["agents"].([]any) {
+		row := x.(map[string]any)
+		rows[row["name"].(string)] = row
+	}
+	if g := rows["glm"]; g == nil || g["in_file"] != true || g["default"] != true || len(g["tasks"].([]any)) != 1 {
+		t.Fatalf("glm %v", g)
+	}
+	if c := rows["claude"]; c == nil || c["in_file"] != false || c["builtin"] != true {
+		t.Fatalf("claude %v", c)
+	}
+	if code, m := do("PUT", "/api/repos/alpha/agents/local", `{"yaml":"protocol: pi-rpc\nversion: 1.5.0\nmodel: x/y\n"}`); code != 200 || m["changed"] != true {
+		t.Fatalf("put %d %v", code, m)
+	}
+	if code, _ := do("PUT", "/api/repos/alpha/agents/local", `{"yaml":"protocol: nope\n"}`); code != 422 {
+		t.Fatalf("invalid put %d", code)
+	}
+	if code, m := do("DELETE", "/api/repos/alpha/agents/glm", ""); code != 409 || !strings.Contains(m["error"].(string), "default") {
+		t.Fatalf("delete default %d %v", code, m)
+	}
+	if code, _ := do("DELETE", "/api/repos/alpha/agents/claude", ""); code != 422 {
+		t.Fatalf("delete built-in not in file %d", code)
+	}
+	if code, _ := do("DELETE", "/api/repos/alpha/agents/local", ""); code != 200 {
+		t.Fatalf("delete %d", code)
+	}
+	if c, err := config.Load(path); err != nil || c.Adapters["local"].Name != "" || c.Adapters["glm"].Name == "" {
+		t.Fatalf("after delete %+v %v", c.Adapters, err)
 	}
 }

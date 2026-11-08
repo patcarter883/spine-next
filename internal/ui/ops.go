@@ -221,6 +221,114 @@ func (s *Server) writeConfig(w http.ResponseWriter, r *http.Request, repo Repo, 
 	writeJSON(w, out)
 }
 
+// - Agents -
+
+type agentRow struct {
+	adapterInfo
+	YAML    string   `json:"yaml"`
+	InFile  bool     `json:"in_file"`
+	Builtin bool     `json:"builtin"`
+	Default bool     `json:"default"`
+	Tasks   []string `json:"tasks"`
+}
+
+// agents lists the repository's agent adapters: what each is, where it is
+// defined, and the unfinished tasks that would run on it.
+func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	src, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
+	cfg, err := config.Parse(src)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	using := s.agentTasks(r, repo, cfg.Agent)
+	builtin := config.Default().Adapters
+	out := []agentRow{}
+	for _, i := range describeAdapters(cfg) {
+		y, _ := config.AdapterYAML(src, i.Name)
+		_, b := builtin[i.Name]
+		out = append(out, agentRow{adapterInfo: i, YAML: y, InFile: y != "", Builtin: b, Default: i.Name == cfg.Agent, Tasks: append([]string{}, using[i.Name]...)})
+	}
+	writeJSON(w, map[string]any{"agents": out, "path": filepath.Join(repo.Path, config.Path), "restart": s.Admin != nil})
+}
+
+// agentTasks maps each agent to the unfinished tasks that run on it.
+func (s *Server) agentTasks(r *http.Request, repo Repo, def string) map[string][]string {
+	out := map[string][]string{}
+	if repo.Store == nil {
+		return out
+	}
+	ts, _ := repo.Store.ListTasks(r.Context())
+	for _, t := range ts {
+		if t.Status.Phase.Done() {
+			continue
+		}
+		n := t.Spec.Adapter
+		if n == "" {
+			n = def
+		}
+		out[n] = append(out[n], string(t.ID))
+	}
+	return out
+}
+
+func (s *Server) putAgent(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	var req struct {
+		YAML string `json:"yaml"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
+	next, err := config.ApplyAdapter(cur, r.PathValue("name"), req.YAML)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	s.writeConfig(w, r, repo, cur, next)
+}
+
+func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	name := r.PathValue("name")
+	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
+	cfg, err := config.Parse(cur)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	if _, builtin := config.Default().Adapters[name]; !builtin {
+		if name == cfg.Agent {
+			httpError(w, http.StatusConflict, name+" is the default agent: choose another default first")
+			return
+		}
+		if ids := s.agentTasks(r, repo, cfg.Agent)[name]; len(ids) > 0 {
+			httpError(w, http.StatusConflict, fmt.Sprintf("unfinished tasks run on %s: %s; cancel them or let them finish first", name, strings.Join(ids, ", ")))
+			return
+		}
+	}
+	next, err := config.RemoveAdapter(cur, name)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	s.writeConfig(w, r, repo, cur, next)
+}
+
 // - Repositories (supervisor) -
 
 func (s *Server) addRepo(w http.ResponseWriter, r *http.Request) {

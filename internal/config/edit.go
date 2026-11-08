@@ -80,6 +80,7 @@ type PiSettings struct {
 	ToolTimeout string       `json:"tool_timeout"`
 	MaxTurns    int          `json:"max_turns"`
 	Container   *PiContainer `json:"container"` // nil = run on the host
+	AgentDir    string       `json:"agent_dir"` // PI_CODING_AGENT_DIR; empty = Pi's own
 	MakeDefault bool         `json:"make_default"`
 }
 
@@ -96,6 +97,9 @@ type PiContainer struct {
 // keeping comments and every other field, and validates the result with
 // Parse. Empty values remove their key, so the defaults apply.
 func ApplyPiAdapter(src []byte, name string, s PiSettings) ([]byte, error) {
+	if !adapterNameRe.MatchString(name) {
+		return nil, fmt.Errorf("config: agent name %q: use letters, digits, '-', '_' or '.'", name)
+	}
 	doc, root, err := parseDoc(src)
 	if err != nil {
 		return nil, err
@@ -120,6 +124,48 @@ func ApplyPiAdapter(src []byte, name string, s PiSettings) ([]byte, error) {
 		put("args", c.Args, len(c.Args) == 0, "container")
 	} else {
 		deletePath(root, "adapters", name, "container")
+	}
+	put("PI_CODING_AGENT_DIR", s.AgentDir, s.AgentDir == "", "env")
+	if env := child(child(child(root, "adapters"), name), "env"); env != nil && len(env.Content) == 0 {
+		deletePath(root, "adapters", name, "env")
+	}
+	if s.MakeDefault {
+		setPath(root, name, "agent")
+	}
+	return encodeDoc(doc)
+}
+
+// ACPSettings are the adapter fields the dashboard's ACP form edits.
+type ACPSettings struct {
+	Command     []string `json:"command"`
+	Permissions string   `json:"permissions"`
+	Mode        string   `json:"mode"`
+	MakeDefault bool     `json:"make_default"`
+}
+
+// ApplyACPAdapter sets an ACP adapter's fields in a config file's YAML,
+// keeping comments and every other field, and validates the result with
+// Parse. Empty values remove their key, so the defaults apply.
+func ApplyACPAdapter(src []byte, name string, s ACPSettings) ([]byte, error) {
+	if !adapterNameRe.MatchString(name) {
+		return nil, fmt.Errorf("config: agent name %q: use letters, digits, '-', '_' or '.'", name)
+	}
+	doc, root, err := parseDoc(src)
+	if err != nil {
+		return nil, err
+	}
+	put := func(key string, v any, empty bool) {
+		if empty {
+			deletePath(root, "adapters", name, key)
+		} else {
+			setPath(root, v, "adapters", name, key)
+		}
+	}
+	put("argv", s.Command, len(s.Command) == 0)
+	put("permissions", s.Permissions, s.Permissions == "")
+	put("mode", s.Mode, s.Mode == "")
+	if child(child(root, "adapters"), name) == nil {
+		setPath(root, map[string]any{}, "adapters", name)
 	}
 	if s.MakeDefault {
 		setPath(root, name, "agent")

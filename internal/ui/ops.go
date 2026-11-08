@@ -225,11 +225,47 @@ func (s *Server) writeConfig(w http.ResponseWriter, r *http.Request, repo Repo, 
 
 type agentRow struct {
 	adapterInfo
-	YAML    string   `json:"yaml"`
-	InFile  bool     `json:"in_file"`
-	Builtin bool     `json:"builtin"`
-	Default bool     `json:"default"`
-	Tasks   []string `json:"tasks"`
+	YAML    string      `json:"yaml"`
+	InFile  bool        `json:"in_file"`
+	Builtin bool        `json:"builtin"`
+	Default bool        `json:"default"`
+	Tasks   []string    `json:"tasks"`
+	Fields  agentFields `json:"fields"`
+}
+
+// agentFields are what the agent forms edit, as configured.
+type agentFields struct {
+	Argv        []string            `json:"argv"`
+	Permissions string              `json:"permissions,omitempty"`
+	Mode        string              `json:"mode,omitempty"`
+	Version     string              `json:"version,omitempty"`
+	Model       string              `json:"model,omitempty"`
+	MaxTurns    int                 `json:"max_turns,omitempty"`
+	ToolTimeout string              `json:"tool_timeout,omitempty"`
+	AgentDir    string              `json:"agent_dir,omitempty"`
+	Container   *config.PiContainer `json:"container,omitempty"`
+	Models      []string            `json:"models"`
+}
+
+func fieldsOf(a agent.Adapter) agentFields {
+	f := agentFields{Argv: a.Argv, Permissions: a.Permissions, Mode: a.Mode, Version: a.Version, Model: a.Model, MaxTurns: a.MaxTurns,
+		AgentDir: a.Env[agent.PiAgentDirEnv], Models: []string{}}
+	if a.ToolTimeout > 0 {
+		f.ToolTimeout = a.ToolTimeout.String()
+	}
+	if c := a.Container; c != nil {
+		f.Container = &config.PiContainer{Image: c.Image, Runtime: c.Runtime, Network: c.Network, Args: c.Args}
+	}
+	if a.Protocol == "pi-rpc" {
+		if doc, _, err := loadPiModels(filepath.Join(agent.PiAgentDir(a), piModelsFile)); err == nil {
+			for _, p := range piProviders(doc) {
+				for _, m := range p.Models {
+					f.Models = append(f.Models, p.Name+"/"+m.ID)
+				}
+			}
+		}
+	}
+	return f
 }
 
 // agents lists the repository's agent adapters: what each is, where it is
@@ -252,9 +288,15 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 	for _, i := range describeAdapters(cfg) {
 		y, _ := config.AdapterYAML(src, i.Name)
 		_, b := builtin[i.Name]
-		out = append(out, agentRow{adapterInfo: i, YAML: y, InFile: y != "", Builtin: b, Default: i.Name == cfg.Agent, Tasks: append([]string{}, using[i.Name]...)})
+		out = append(out, agentRow{adapterInfo: i, YAML: y, InFile: y != "", Builtin: b, Default: i.Name == cfg.Agent, Tasks: append([]string{}, using[i.Name]...),
+			Fields: fieldsOf(cfg.Adapters[i.Name])})
 	}
-	writeJSON(w, map[string]any{"agents": out, "path": filepath.Join(repo.Path, config.Path), "restart": s.Admin != nil})
+	pi := fieldsOf(piAdapter(cfg))
+	if pi.Container == nil {
+		image, rt := piImageOf(piAdapter(cfg))
+		pi.Container = &config.PiContainer{Image: image, Runtime: rt}
+	}
+	writeJSON(w, map[string]any{"agents": out, "new_pi": pi, "path": filepath.Join(repo.Path, config.Path), "restart": s.Admin != nil})
 }
 
 // agentTasks maps each agent to the unfinished tasks that run on it.
@@ -291,6 +333,32 @@ func (s *Server) putAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
 	next, err := config.ApplyAdapter(cur, r.PathValue("name"), req.YAML)
+	if err != nil {
+		httpError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	s.writeConfig(w, r, repo, cur, next)
+}
+
+func (s *Server) putACPAdapter(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	var req config.ACPSettings
+	if !decode(w, r, &req) {
+		return
+	}
+	req.Command = strings.Fields(strings.Join(req.Command, " "))
+	switch req.Permissions {
+	case "", "worktree", "allow", "reject":
+	default:
+		httpError(w, http.StatusUnprocessableEntity, "permissions must be worktree, allow or reject")
+		return
+	}
+	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
+	next, err := config.ApplyACPAdapter(cur, r.PathValue("name"), req)
 	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err.Error())
 		return

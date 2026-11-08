@@ -1027,21 +1027,56 @@ async function settingsAgents(rn) {
    ${admin ? `<div class="actions"><button class="btn" id="aadd">+ Add agent</button></div>` : ""}`;
   if (!admin) return;
   const saved = r => { savedToast(r); settingsAgents(rn); settingsConfig(rn); settingsPi(rn) };
-  const edit = a => dialog(`<h2>${a ? `Agent ${esc(a.name)}` : "New agent"}</h2><form class="f" id="agf">
-     <label>Name<input name="name" required value="${esc(a?.name || "")}" ${a ? "readonly" : ""} placeholder="glm"></label>
-     <label>Adapter YAML<textarea name="yaml" style="min-height:260px;font-family:ui-monospace,monospace;font-size:12px" placeholder="protocol: pi-rpc
-version: 1.5.0
-model: openrouter/z-ai/glm-5.3-flash
-container:
-  image: spine-pi:1.5.0">${esc(a?.yaml || "")}</textarea></label>
-     <p class="hint">The fields under <code>adapters.${esc(a?.name || "NAME")}</code>.${a && !a.in_file ? " Built-in: anything set here overrides its defaults." : ""}</p>
+  const yamlEdit = a => dialog(`<h2>Agent ${esc(a.name)}: YAML</h2><form class="f" id="agy">
+     <label>Adapter YAML<textarea name="yaml" style="min-height:260px;font-family:ui-monospace,monospace;font-size:12px">${esc(a.yaml || "")}</textarea></label>
+     <p class="hint">The fields under <code>adapters.${esc(a.name)}</code>, for settings the form doesn't show (<code>pass_env</code>, <code>env</code>, container mounts).${a.in_file ? "" : " Built-in: anything set here overrides its defaults."}</p>
      <div class="err" id="agErr"></div><div class="actions"><button class="btn primary">Validate and save</button><button type="button" class="btn" id="agc">Cancel</button></div></form>`, b => {
     $("#agc", b).onclick = closeDialog;
-    $("#agf", b).onsubmit = async e => {
-      e.preventDefault(); const f = e.target;
-      try { const r = await send("PUT", `/api/repos/${enc(rn)}/agents/${enc(f.name.value.trim())}`, { yaml: f.yaml.value }); closeDialog(); saved(r) } catch (x) { $("#agErr", b).textContent = x.message }
+    $("#agy", b).onsubmit = async e => {
+      e.preventDefault();
+      try { const r = await send("PUT", `/api/repos/${enc(rn)}/agents/${enc(a.name)}`, { yaml: e.target.yaml.value }); closeDialog(); saved(r) } catch (x) { $("#agErr", b).textContent = x.message }
     };
   });
+  const edit = a => {
+    const pi = a ? a.protocol === "pi-rpc" : true, v = a ? a.fields : { ...j.new_pi, argv: [], mode: "", permissions: "", model: "", max_turns: 0, tool_timeout: "" }, c = v.container;
+    dialog(`<h2>${a ? `Agent ${esc(a.name)}` : "New agent"}</h2><form class="f" id="agf">
+     <div class="row"><label>Name<input name="name" required value="${esc(a?.name || "")}" ${a ? "readonly" : ""} placeholder="glm"></label>
+      <label>Kind<select name="kind" ${a ? "disabled" : ""}><option value="pi" ${pi ? "selected" : ""}>Pi: local or OpenRouter models</option><option value="acp" ${pi ? "" : "selected"}>ACP: Claude Code or another ACP agent</option></select></label></div>
+     <div id="agPi"><div class="row3"><label>Pi version (pinned exactly)<input name="version" value="${esc(v.version || j.new_pi.version)}"></label>
+       <label>Model (provider/id)<input name="model" list="agModels" value="${esc(v.model || "")}" placeholder="openrouter/z-ai/glm-5.3-flash"><datalist id="agModels">${(v.models.length ? v.models : j.new_pi.models).map(m => `<option value="${esc(m)}">`).join("")}</datalist></label>
+       <label>Max turns per run<input name="max_turns" type="number" min="0" value="${v.max_turns || ""}" placeholder="80"></label></div>
+      <div class="row3"><label>Tool timeout<input name="tool_timeout" value="${esc(v.tool_timeout || "")}" placeholder="10m"></label>
+       <label>Pi config directory<input name="agent_dir" value="${esc(v.agent_dir || "")}" placeholder="~/.pi/agent"></label></div>
+      <p class="hint">The config directory holds <code>models.json</code>, which lists the models. The provider's API key reaches the agent from the supervisor's environment.</p>
+      <label class="check"><input type="checkbox" name="boxed" ${c || !a ? "checked" : ""}> Run each agent in a fresh container (recommended)</label>
+      <div class="row3" id="agBox"><label>Image<input name="image" value="${esc(c?.image || j.new_pi.container?.image || "")}"></label>
+       <label>Runtime<select name="runtime">${["docker", "podman"].map(x => `<option ${x === (c?.runtime || "docker") ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+       <label>Network<input name="network" value="${esc(c?.network || "")}" placeholder="host"></label>
+       <label>Extra run arguments<input name="args" value="${esc((c?.args || []).join(" "))}" placeholder="--memory 8g --cpus 4"></label></div></div>
+     <div id="agAcp"><div class="row3"><label>Command<input name="command" value="${esc((v.argv || []).join(" "))}" placeholder="claude-agent-acp"></label>
+       <label>Permissions<select name="permissions">${["worktree", "allow", "reject"].map(x => `<option ${x === (v.permissions || "worktree") ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+       <label>Mode<input name="mode" value="${esc(v.mode || "")}" placeholder="acceptEdits"></label></div>
+      <p class="hint"><b>worktree</b> allows edits inside the task's worktree only; <b>allow</b> approves every request; <b>reject</b> refuses them all.</p></div>
+     <label class="check"><input type="checkbox" name="make_default" ${a?.default ? "checked disabled" : ""}> This repository's default agent</label>
+     <div class="err" id="agErr"></div><div class="actions"><button class="btn primary">Save agent</button>${a ? `<button type="button" class="btn" id="agyaml">Edit YAML…</button>` : ""}<button type="button" class="btn" id="agc">Cancel</button></div></form>`, b => {
+      const f = $("#agf", b), sync = () => { const p = f.kind.value === "pi"; $("#agPi", b).hidden = !p; $("#agAcp", b).hidden = p; $("#agBox", b).hidden = !f.boxed.checked };
+      sync(); f.kind.onchange = sync; f.boxed.onchange = sync;
+      $("#agc", b).onclick = closeDialog;
+      const y = $("#agyaml", b); if (y) y.onclick = () => { closeDialog(); yamlEdit(a) };
+      f.onsubmit = async e => {
+        e.preventDefault(); $("#agErr", b).textContent = "";
+        const name = f.name.value.trim(), def = f.make_default.checked && !a?.default;
+        let kind = "acp", body = { command: f.command.value.split(/\s+/).filter(Boolean), permissions: f.permissions.value, mode: f.mode.value.trim(), make_default: def };
+        if (f.kind.value === "pi") {
+          if (!f.boxed.checked && !confirm("Without a container Pi runs directly on this machine, with no sandbox and no approvals. Continue?")) return;
+          kind = "pi";
+          body = { version: f.version.value, model: f.model.value, tool_timeout: f.tool_timeout.value, max_turns: +f.max_turns.value, agent_dir: f.agent_dir.value, make_default: def,
+            container: f.boxed.checked ? { image: f.image.value, runtime: f.runtime.value, network: f.network.value, args: f.args.value.split(/\s+/).filter(Boolean) } : null };
+        }
+        try { const r = await send("PUT", `/api/repos/${enc(rn)}/agents/${enc(name)}/${kind}`, body); closeDialog(); saved(r) } catch (x) { $("#agErr", b).textContent = x.message }
+      };
+    });
+  };
   $$("[data-aedit]", el).forEach(b => b.onclick = () => edit(j.agents.find(a => a.name === b.dataset.aedit)));
   $("#aadd", el).onclick = () => edit(null);
   $$("[data-adel]", el).forEach(b => b.onclick = async () => {
@@ -1056,15 +1091,14 @@ function savedToast(j) {
   if (j.uncommitted) toast("<code>.spine/config.yaml</code> has uncommitted changes: tasks can't integrate into a checked-out base branch until you commit it.", "warn");
 }
 
-// - Pi agent: install, model server, adapter -
+// - Pi agent: install, model server -
 const KEY_LABEL = { none: "no key", unused: "no key needed", env: "from the environment", literal: "stored in the file", command: "from a command" };
 async function settingsPi(rn) {
   const p = await get(`/api/repos/${enc(rn)}/pi`).catch(e => ({ error: e.message }));
   if (route.view !== "settings" || !$("#pi")) return;
   $("#pi").className = "";
   if (p.error) { $("#pi").innerHTML = `<p class="fail">${esc(p.error)}</p>`; return }
-  const admin = can("admin"), ro = admin ? "" : "disabled", a = p.adapter, c = a.container, provs = p.models.providers;
-  const modelIds = provs.flatMap(x => x.models.map(m => x.name + "/" + m.id));
+  const admin = can("admin"), a = p.adapter, provs = p.models.providers;
   $("#pi").innerHTML = `<p class="hint">Local models through <a href="https://www.npmjs.com/package/${esc(p.package)}" target="_blank" rel="noopener">Pi</a>. Run it in a container: Pi has no sandbox and never asks for approval.</p>
    <div id="piStat"></div>
    ${admin ? `<h3 class="sec">1. Install Pi ${esc(a.version)}</h3><div class="actions" id="piInst"></div><div id="piJob"></div>` : ""}
@@ -1074,29 +1108,8 @@ async function settingsPi(rn) {
    ${provs.length ? `<table><tr><th>Provider</th><th>Server</th><th>API key</th><th>Models</th><th></th></tr>${provs.map(x => `<tr><td>${esc(x.name)}</td><td class="mono">${esc(x.base_url)}</td><td>${esc(KEY_LABEL[x.key.kind])}${x.key.env ? ` <code>$${esc(x.key.env)}</code>` : ""}</td><td class="mono">${x.models.map(m => esc(m.id)).join("<br>")}</td>
      <td>${admin ? `<button class="btn small" data-pedit="${esc(x.name)}">Edit</button> <button class="btn small danger" data-pdel="${esc(x.name)}">Remove</button>` : ""}</td></tr>`).join("")}</table>` : `<p class="muted">No model server configured yet.</p>`}
    ${admin ? `<form class="f" id="pmf" style="margin-top:10px"></form>` : ""}
-   <h3 class="sec">${admin ? "3. " : ""}Adapter</h3>
-   <p class="hint"><code>adapters.${esc(a.name)}</code> in this repository's <code>.spine/config.yaml</code>; ${p.restart ? "saving restarts this repository's controller" : "restart <code>spine controller</code> to apply changes"}.</p>
-   <form class="f" id="paf"><div class="row3"><label>Pi version (pinned exactly)<input name="version" value="${esc(a.version)}" required ${ro}></label>
-     <label>Model (provider/id)<input name="model" list="piModels" value="${esc(a.model || modelIds[0] || "")}" ${ro}><datalist id="piModels">${modelIds.map(m => `<option value="${esc(m)}">`).join("")}</datalist></label>
-     <label>Max turns per run<input name="max_turns" type="number" min="0" value="${a.max_turns || ""}" placeholder="80" ${ro}></label></div>
-    <div class="row3"><label>Tool timeout<input name="tool_timeout" value="${esc(a.tool_timeout || "")}" placeholder="10m" ${ro}></label></div>
-    <label class="check"><input type="checkbox" name="boxed" ${c || admin ? "checked" : ""} ${ro}> Run each agent in a fresh container (recommended)</label>
-    <div class="row3" id="piBox"><label>Image<input name="image" value="${esc(p.container.image)}" ${ro}></label>
-     <label>Runtime<select name="runtime" ${ro}>${["docker", "podman"].map(x => `<option ${x === p.container.runtime ? "selected" : ""}>${x}</option>`).join("")}</select></label>
-     <label>Network<input name="network" value="${esc(c?.network || "")}" placeholder="host" ${ro}></label>
-     <label>Extra run arguments<input name="args" value="${esc((c?.args || []).join(" "))}" placeholder="--memory 8g --cpus 4" ${ro}></label></div>
-    <label class="check"><input type="checkbox" name="make_default" ${a.default ? "checked disabled" : ""} ${ro}> Use Pi as this repository's default agent${a.default ? "" : ` (now ${esc(a.default_agent)})`}</label>
-    ${admin ? `<div class="actions"><button class="btn primary">Save adapter</button></div>` : ""}<div class="err" id="pafErr"></div></form>
-   ${admin ? `<h3 class="sec">4. Check</h3><div class="actions"><button class="btn" id="piChk">Check Pi</button><span id="piChkOut" class="hint"></span></div>` : ""}`;
+   ${admin ? `<h3 class="sec">3. Check</h3><div class="actions"><button class="btn" id="piChk">Check Pi</button><span id="piChkOut" class="hint"></span></div>` : ""}`;
   piStatusRender(rn, p);
-  const af = $("#paf"), box = () => { $("#piBox").hidden = !af.boxed.checked }; box(); af.boxed.onchange = box;
-  af.onsubmit = async e => {
-    e.preventDefault(); $("#pafErr").textContent = "";
-    if (!af.boxed.checked && !confirm("Without a container Pi runs directly on this machine, with no sandbox and no approvals. Continue?")) return;
-    const body = { version: af.version.value, model: af.model.value, tool_timeout: af.tool_timeout.value, max_turns: +af.max_turns.value, make_default: af.make_default.checked && !a.default,
-      container: af.boxed.checked ? { image: af.image.value, runtime: af.runtime.value, network: af.network.value, args: af.args.value.split(/\s+/).filter(Boolean) } : null };
-    try { savedToast(await send("PUT", `/api/repos/${enc(rn)}/pi/adapter`, body)); settingsPi(rn); settingsConfig(rn) } catch (x) { $("#pafErr").textContent = x.message }
-  };
   if (!admin) return;
   piProviderForm(rn, p, provs.length === 1 ? provs[0] : null);
   $$("[data-pedit]").forEach(b => b.onclick = () => piProviderForm(rn, p, provs.find(x => x.name === b.dataset.pedit)));

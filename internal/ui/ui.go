@@ -134,7 +134,10 @@ func (s *Server) routes() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(b)
 	})
-	m.Handle("GET /static/", http.StripPrefix("/static/", files))
+	m.Handle("GET /static/", http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})))
 
 	// Session.
 	m.HandleFunc("GET /api/me", s.me)
@@ -193,9 +196,10 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /api/admin/supervisor", s.need(auth.Admin, s.putSupervisorSettings))
 	m.HandleFunc("GET /api/repos/{repo}/agents", s.agents)
 	m.HandleFunc("PUT /api/repos/{repo}/agents/{name}", s.need(auth.Admin, s.putAgent))
+	m.HandleFunc("PUT /api/repos/{repo}/agents/{name}/pi", s.need(auth.Admin, s.putPiAdapter))
+	m.HandleFunc("PUT /api/repos/{repo}/agents/{name}/acp", s.need(auth.Admin, s.putACPAdapter))
 	m.HandleFunc("DELETE /api/repos/{repo}/agents/{name}", s.need(auth.Admin, s.deleteAgent))
 	m.HandleFunc("GET /api/repos/{repo}/pi", s.piStatus)
-	m.HandleFunc("PUT /api/repos/{repo}/pi/adapter", s.need(auth.Admin, s.putPiAdapter))
 	m.HandleFunc("PUT /api/repos/{repo}/pi/models", s.need(auth.Admin, s.putPiProvider))
 	m.HandleFunc("DELETE /api/repos/{repo}/pi/models/{provider}", s.need(auth.Admin, s.deletePiProvider))
 	m.HandleFunc("POST /api/repos/{repo}/pi/discover", s.need(auth.Admin, s.piDiscover))

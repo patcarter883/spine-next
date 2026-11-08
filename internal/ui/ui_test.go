@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/config"
 	"github.com/patcarter883/spine-next/internal/inbox"
@@ -241,6 +242,36 @@ func TestAgentsEditing(t *testing.T) {
 	}
 	if code, _ := do("DELETE", "/api/repos/alpha/agents/claude", ""); code != 422 {
 		t.Fatalf("delete built-in not in file %d", code)
+	}
+	if code, m := do("PUT", "/api/repos/alpha/agents/or/pi", `{"version":"1.5.0","model":"openrouter/m","agent_dir":"/cfg/pi","container":{"image":"img:1"}}`); code != 200 || m["changed"] != true {
+		t.Fatalf("pi form %d %v", code, m)
+	}
+	if code, _ := do("PUT", "/api/repos/alpha/agents/or/pi", `{"version":"1.5.0","agent_dir":"relative"}`); code != 422 {
+		t.Fatalf("relative agent dir %d", code)
+	}
+	if code, m := do("PUT", "/api/repos/alpha/agents/other/acp", `{"command":["my-acp","--flag"],"permissions":"reject"}`); code != 200 || m["changed"] != true {
+		t.Fatalf("acp form %d %v", code, m)
+	}
+	for _, bad := range []string{`{"command":[],"permissions":"worktree"}`, `{"command":["x"],"permissions":"sometimes"}`} {
+		if code, _ := do("PUT", "/api/repos/alpha/agents/other2/acp", bad); code != 422 {
+			t.Errorf("%s: %d", bad, code)
+		}
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if or := c.Adapters["or"]; or.Env[agent.PiAgentDirEnv] != "/cfg/pi" || or.Container == nil || or.Container.Image != "img:1" || or.Model != "openrouter/m" {
+		t.Fatalf("or %+v", or)
+	}
+	if o := c.Adapters["other"]; len(o.Argv) != 2 || o.Permissions != "reject" || o.Protocol != "" {
+		t.Fatalf("other %+v", o)
+	}
+	_, m = do("GET", "/api/repos/alpha/agents", "")
+	for _, x := range m["agents"].([]any) {
+		if row := x.(map[string]any); row["name"] == "or" && row["fields"].(map[string]any)["agent_dir"] != "/cfg/pi" {
+			t.Fatalf("fields %v", row["fields"])
+		}
 	}
 	if code, _ := do("DELETE", "/api/repos/alpha/agents/local", ""); code != 200 {
 		t.Fatalf("delete %d", code)

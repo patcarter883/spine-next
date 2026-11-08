@@ -326,13 +326,13 @@ func (s *Server) putPiAdapter(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
-	cfg, err := config.Parse(cur)
-	if err != nil {
-		bad(err.Error())
+	req.AgentDir = strings.TrimSpace(req.AgentDir)
+	if req.AgentDir != "" && !filepath.IsAbs(req.AgentDir) {
+		bad("the Pi config directory must be an absolute path")
 		return
 	}
-	next, err := config.ApplyPiAdapter(cur, piAdapter(cfg).Name, req)
+	cur, _ := os.ReadFile(filepath.Join(repo.Path, config.Path))
+	next, err := config.ApplyPiAdapter(cur, r.PathValue("name"), req)
 	if err != nil {
 		bad(err.Error())
 		return

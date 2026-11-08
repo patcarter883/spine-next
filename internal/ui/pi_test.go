@@ -192,7 +192,7 @@ func TestPiModelsKeepOtherFieldsAndHideKeys(t *testing.T) {
 
 func TestPiAdapterSaveAndWarnings(t *testing.T) {
 	srv, path, dir := piEnv(t, nil)
-	c, j := piCall(t, srv, "PUT", "/api/repos/alpha/pi/adapter", map[string]any{"version": "1.5.0", "model": "local/m", "make_default": true, "container": map[string]any{"image": "", "network": "host"}})
+	c, j := piCall(t, srv, "PUT", "/api/repos/alpha/agents/pi/pi", map[string]any{"version": "1.5.0", "model": "local/m", "make_default": true, "container": map[string]any{"image": "", "network": "host"}})
 	if c != 200 || j["changed"] != true {
 		t.Fatalf("save: %d %v", c, j)
 	}
@@ -219,7 +219,7 @@ func TestPiAdapterSaveAndWarnings(t *testing.T) {
 		{"version": "1.5.0", "container": map[string]any{"image": "x", "runtime": "sh"}},
 		{"version": "1.5.0", "tool_timeout": "soon"},
 	} {
-		if c, _ := piCall(t, srv, "PUT", "/api/repos/alpha/pi/adapter", bad); c != 422 {
+		if c, _ := piCall(t, srv, "PUT", "/api/repos/alpha/agents/pi/pi", bad); c != 422 {
 			t.Errorf("%v: %d", bad, c)
 		}
 	}
@@ -276,7 +276,7 @@ func TestPiRoles(t *testing.T) {
 	if c := call("GET", "/api/repos/alpha/pi", viewer); c != 200 {
 		t.Fatalf("viewer status: %d", c)
 	}
-	for _, x := range [][2]string{{"POST", "/api/repos/alpha/pi/install"}, {"PUT", "/api/repos/alpha/pi/adapter"}, {"PUT", "/api/repos/alpha/pi/models"},
+	for _, x := range [][2]string{{"POST", "/api/repos/alpha/pi/install"}, {"PUT", "/api/repos/alpha/agents/pi/pi"}, {"PUT", "/api/repos/alpha/pi/models"},
 		{"DELETE", "/api/repos/alpha/pi/models/x"}, {"POST", "/api/repos/alpha/pi/discover"}, {"POST", "/api/repos/alpha/pi/check"}, {"GET", "/api/pi/install"}} {
 		if c := call(x[0], x[1], op); c != 403 {
 			t.Errorf("operator %s %s: %d", x[0], x[1], c)

@@ -64,6 +64,7 @@ pre.log{background:var(--bg);border:1px solid var(--line);border-radius:6px;padd
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media (max-width:900px){.grid2{grid-template-columns:1fr}}
 form.f{display:grid;gap:12px;max-width:780px}form.f label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
 form.f textarea{min-height:120px;resize:vertical}form.f .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}form.f .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+form.f .row>*,form.f .row3>*{min-width:0}.dlg:has(.row3){width:min(760px,100%)}
 @media (max-width:640px){form.f .row,form.f .row3{grid-template-columns:1fr}}
 .check,form.f label.check{display:flex;gap:8px;align-items:center;color:var(--fg)!important}form.f .gatechecks label.check{display:inline-flex;align-items:baseline}.err{color:var(--bad);font-size:13px;min-height:1em;white-space:pre-wrap}.hint{font-size:12px;color:var(--muted)}
 .gatechecks{display:flex;flex-wrap:wrap;gap:6px 14px}

@@ -648,7 +648,7 @@ function planEditor(el, readonly) {
      <label>Intent<textarea data-k="intent" ${ro}>${esc(t.intent)}</textarea></label>
      <div class="row2"><label>Scope (one glob per line)<textarea data-k="scope" ${ro} style="min-height:50px">${esc((t.scope || []).join("\n"))}</textarea></label>
      <label>After (ids)<textarea data-k="after" ${ro} style="min-height:50px">${esc((t.after || []).join("\n"))}</textarea></label>
-     <label>Agent / gates<input data-k="agent" value="${esc(t.agent || "")}" placeholder="default agent" ${ro}><input data-k="gates" value="${esc((t.gates || []).join(", "))}" placeholder="all gates" ${ro}></label></div>
+     <label>Agent / gates<select data-k="agent" ${ro}>${agentOptions(t.agent, null)}</select><input data-k="gates" value="${esc((t.gates || []).join(", "))}" placeholder="all gates" ${ro}></label></div>
      ${readonly ? "" : `<div class="sugg" data-sg-i="${i}"></div>`}<div class="issues"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
    ${readonly ? `<p class="hint">${!can("operator") ? "Read-only." : "This plan was already handled."}</p>` : `<div class="actions"><button class="btn" id="padd">+ Add task</button><button class="btn" id="pexport">Export JSON</button>
      <label class="check hint"><input type="checkbox" id="pappr"> hold every task for my approval</label><button class="btn primary" id="psubmit">Submit ${p.tasks.length} task(s)</button>
@@ -671,7 +671,8 @@ function planEditor(el, readonly) {
     } catch (e) { $("#pissues", el).innerHTML = `<div class="fail">${esc(e.message)}</div>` }
   };
   const issue = x => `<div class="${x.level === "error" ? "fail" : "warn"}">${x.level === "error" ? "✗" : "!"} ${x.field ? `<b>${esc(x.field)}</b>: ` : ""}${esc(x.message)}</div>`;
-  $$("input,textarea", $("#ptasks", el)).forEach(i => i.oninput = () => { clearTimeout(valTimer); valTimer = setTimeout(validate, 500) });
+  $$("input,textarea,select", $("#ptasks", el)).forEach(i => i.oninput = () => { clearTimeout(valTimer); valTimer = setTimeout(validate, 500) });
+  get(`/api/repos/${enc(p.repo)}/defaults`).then(d => $$("select[data-k=agent]", el).forEach(sel => { const v = sel.value; sel.innerHTML = agentOptions(v, d) })).catch(() => {});
   if (!readonly) $$(".ptask", el).forEach(div => {
     const i = +div.dataset.i, ta = $("[data-k=intent]", div), sc = $("[data-k=scope]", div), box = $("[data-sg-i]", div);
     const pick = globs => { const cur = lines(sc.value); for (const g of globs) if (!cur.includes(g)) cur.push(g); sc.value = cur.join("\n"); clearTimeout(valTimer); valTimer = setTimeout(validate, 300) };
@@ -693,6 +694,12 @@ function planEditor(el, readonly) {
   };
   validate();
 }
+const agentOptions = (cur, d) => {
+  const as = d?.adapters || [], def = as.find(a => a.name === d.agent);
+  const opts = [`<option value="">${def ? `default (${esc(def.label)})` : "default agent"}</option>`, ...as.map(a => `<option value="${esc(a.name)}" ${a.name === cur ? "selected" : ""}>${esc(a.label)}</option>`)];
+  if (cur && !as.some(a => a.name === cur)) opts.push(`<option value="${esc(cur)}" selected>${esc(cur)}${d ? " — not configured" : ""}</option>`);
+  return opts.join("");
+};
 const clean = t => { const o = { id: (t.id || "").trim(), intent: t.intent || "" }; for (const k of ["title", "agent", "template"]) if (t[k]) o[k] = t[k]; for (const k of ["scope", "after", "gates"]) if ((t[k] || []).length) o[k] = t[k]; for (const k of ["max_attempts", "max_rounds", "max_tokens", "require_approval"]) if (t[k]) o[k] = t[k]; return o };
 function drawPlanGraph(el, tasks) {
   const nodes = tasks.map(t => ({ key: t.id, label: t.id || "(no id)", deps: (t.after || []).filter(d => tasks.some(x => x.id === d)), state: "ready" }));

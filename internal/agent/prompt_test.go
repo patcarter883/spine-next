@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/patcarter883/spine-next/internal/plan"
 	"github.com/patcarter883/spine-next/internal/repoctx"
 )
 
@@ -26,5 +27,23 @@ func TestSurveyPromptStatesTheGatesLimits(t *testing.T) {
 	}
 	if repoctx.Tokens(strings.Repeat("x", 4800)) != 1200 || repoctx.Tokens(strings.Repeat("x", 4801)) != 1201 {
 		t.Fatal("the stated byte cap no longer matches the gate's token estimate")
+	}
+}
+
+func TestPlanPromptListsQueuedWork(t *testing.T) {
+	out := Prompt{Task: "p", Attempt: 1, Plan: true, Intent: "goal"}.Render()
+	if strings.Contains(out, "Work already queued") || !strings.Contains(out, "`after` names only ids in this plan") {
+		t.Fatalf("no queued work: %s", out)
+	}
+	q := []plan.Queued{
+		{ID: "fix-policy", Title: "Fix BusinessPolicy", State: "Working", Scope: []string{"app/Policies/**"}},
+		{ID: "b-tests", State: "proposed", Plan: "plan-b", After: []string{"fix-policy"}},
+	}
+	out = Prompt{Task: "p", Attempt: 1, Plan: true, Intent: "goal", Queued: q}.Render()
+	for _, want := range []string{"# Work already queued", "- `fix-policy` (Working): Fix BusinessPolicy; scope: app/Policies/**",
+		"- `b-tests` (proposed by plan plan-b, not submitted yet); scope: everything; after: fix-policy", "`after` names ids in this plan or queued tasks"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

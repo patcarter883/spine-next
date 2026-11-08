@@ -66,6 +66,52 @@ type Env struct {
 	// AllowExisting accepts ids that already exist (re-validating a plan
 	// after part of it was submitted).
 	AllowExisting bool
+	// Queued is the work already in the repository: unfinished tasks, and
+	// tasks other plans propose that are still waiting for review. Plan
+	// tasks may depend on them, and are checked for overlapping scopes.
+	Queued []Queued
+	// Submitting makes a dependency on a task that is only proposed an
+	// error: it would never appear.
+	Submitting bool
+}
+
+// Queued is a task that is not finished, or that a plan awaiting review
+// proposes (Plan is then that planner task's id).
+type Queued struct {
+	ID    string   `json:"id"`
+	Title string   `json:"title,omitempty"`
+	State string   `json:"state"`
+	Scope []string `json:"scope,omitempty"`
+	After []string `json:"after,omitempty"`
+	Plan  string   `json:"plan,omitempty"`
+}
+
+// QueuedFrom lists the unfinished tasks and the tasks proposed by plans
+// awaiting review, leaving out the planner task self.
+func QueuedFrom(ts []api.Task, self api.TaskID) []Queued {
+	var out []Queued
+	for _, t := range ts {
+		if t.ID == self || t.Status.Phase.Done() {
+			continue
+		}
+		switch t.Spec.Kind {
+		case api.KindPlan:
+			if t.Status.Phase != api.PhaseEscalated || t.Status.Plan == nil {
+				continue
+			}
+			for _, pt := range t.Status.Plan.Tasks {
+				out = append(out, Queued{ID: strings.TrimSpace(pt.ID), Title: pt.Title, State: "proposed", Scope: pt.Scope, After: pt.After, Plan: string(t.ID)})
+			}
+		case api.KindSurvey:
+		default:
+			q := Queued{ID: string(t.ID), Title: t.Spec.Title, State: string(t.Status.Phase), Scope: t.Spec.Scope}
+			for _, d := range t.Spec.DependsOn {
+				q.After = append(q.After, string(d))
+			}
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // MaxTasks bounds a plan.
@@ -82,6 +128,12 @@ func Validate(p api.Plan, env Env) []Issue {
 	}
 	if len(p.Tasks) > MaxTasks {
 		add(Error, "", "", "the plan has %d tasks; the limit is %d", len(p.Tasks), MaxTasks)
+	}
+	proposed := map[string]Queued{}
+	for _, q := range env.Queued {
+		if q.Plan != "" {
+			proposed[q.ID] = q
+		}
 	}
 	ids := map[string]int{}
 	for i, t := range p.Tasks {
@@ -103,6 +155,9 @@ func Validate(p api.Plan, env Env) []Issue {
 			if ph, ok := env.TaskPhase(id); ok {
 				add(Error, label, "id", "a task with this id already exists (%s)", ph)
 			}
+		}
+		if q, ok := proposed[id]; ok && id != "" {
+			add(Warning, label, "id", "plan %s also proposes %q: whichever is submitted second will be refused", q.Plan, id)
 		}
 		intent := strings.TrimSpace(t.Intent)
 		switch {
@@ -182,9 +237,15 @@ func Validate(p api.Plan, env Env) []Issue {
 				}
 				if env.TaskPhase != nil {
 					ph, ok := env.TaskPhase(d)
-					if !ok {
+					q, isProposed := proposed[d]
+					switch {
+					case !ok && isProposed && env.Submitting:
+						add(Error, id, "after", "%q is only proposed, by plan %s: submit that plan first", d, q.Plan)
+					case !ok && isProposed:
+						add(Warning, id, "after", "%q is proposed by plan %s: submit that plan before this one", d, q.Plan)
+					case !ok:
 						add(Error, id, "after", "%q is neither in this plan nor an existing task", d)
-					} else if ph == api.PhaseFailed || ph == api.PhaseCancelled {
+					case ph == api.PhaseFailed || ph == api.PhaseCancelled:
 						add(Warning, id, "after", "%q is %s: this task will escalate", d, ph)
 					}
 				}
@@ -216,20 +277,23 @@ func Validate(p api.Plan, env Env) []Issue {
 				if reach[a.ID][b.ID] || reach[b.ID][a.ID] {
 					continue
 				}
-				if g, h, ok := overlap(a.Scope, b.Scope); ok {
-					add(Warning, b.ID, "scope", "may run beside %q and both may change %s (%s / %s): add an `after` link or narrow the scopes", a.ID, g, g, h)
+				if why, ok := clash(env.Modules, a.Scope, b.Scope); ok {
+					add(Warning, b.ID, "scope", "may run beside %q%s", a.ID, why)
+				}
+			}
+		}
+		before := queuedReach(p, env.Queued)
+		for _, t := range p.Tasks {
+			for _, q := range env.Queued {
+				if q.ID == t.ID || before[t.ID][q.ID] {
 					continue
 				}
-				if env.Modules == nil || len(a.Scope) == 0 || len(b.Scope) == 0 {
-					continue
+				what := fmt.Sprintf("task %q (%s)", q.ID, q.State)
+				if q.Plan != "" {
+					what = fmt.Sprintf("%q, proposed by plan %s", q.ID, q.Plan)
 				}
-				ma, mb := touched(env.Modules, a.Scope), touched(env.Modules, b.Scope)
-				if m := sharedModule(ma, mb); m != "" {
-					add(Warning, b.ID, "scope", "may run beside %q and both change module %s: expect merge conflicts; add an `after` link or merge the tasks", a.ID, m)
-					continue
-				}
-				if p, ok := coChanged(env.Modules, ma, mb); ok {
-					add(Warning, b.ID, "scope", "may run beside %q, but %s and %s changed together in %d commits: they likely need coordinated edits (add an `after` link)", a.ID, p.A, p.B, p.Commits)
+				if why, ok := clash(env.Modules, q.Scope, t.Scope); ok {
+					add(Warning, t.ID, "scope", "may run beside %s%s", what, why)
 				}
 			}
 		}
@@ -406,6 +470,52 @@ func Reach(p api.Plan) map[string]map[string]bool {
 	for _, t := range p.Tasks {
 		out[t.ID] = map[string]bool{}
 		walk(t.ID, t.ID, 0)
+	}
+	return out
+}
+
+// clash says why two tasks' scopes may conflict when they run side by side.
+func clash(m *modmap.Map, a, b []string) (string, bool) {
+	if g, h, ok := overlap(a, b); ok {
+		return fmt.Sprintf(" and both may change %s (%s / %s): add an `after` link or narrow the scopes", g, g, h), true
+	}
+	if m == nil || len(a) == 0 || len(b) == 0 {
+		return "", false
+	}
+	ma, mb := touched(m, a), touched(m, b)
+	if mod := sharedModule(ma, mb); mod != "" {
+		return fmt.Sprintf(" and both change module %s: expect merge conflicts; add an `after` link or merge the tasks", mod), true
+	}
+	if p, ok := coChanged(m, ma, mb); ok {
+		return fmt.Sprintf(", but %s and %s changed together in %d commits: they likely need coordinated edits (add an `after` link)", p.A, p.B, p.Commits), true
+	}
+	return "", false
+}
+
+// queuedReach maps each plan task to the queued tasks it runs after,
+// directly or through other tasks.
+func queuedReach(p api.Plan, queued []Queued) map[string]map[string]bool {
+	deps := map[string][]string{}
+	for _, q := range queued {
+		deps[q.ID] = q.After
+	}
+	for _, t := range p.Tasks {
+		deps[strings.TrimSpace(t.ID)] = t.After
+	}
+	out := map[string]map[string]bool{}
+	for _, t := range p.Tasks {
+		seen := map[string]bool{}
+		stack := append([]string{}, deps[strings.TrimSpace(t.ID)]...)
+		for len(stack) > 0 {
+			d := strings.TrimSpace(stack[len(stack)-1])
+			stack = stack[:len(stack)-1]
+			if seen[d] {
+				continue
+			}
+			seen[d] = true
+			stack = append(stack, deps[d]...)
+		}
+		out[strings.TrimSpace(t.ID)] = seen
 	}
 	return out
 }

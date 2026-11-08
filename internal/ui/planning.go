@@ -220,7 +220,7 @@ type planBody struct {
 }
 
 // planEnv gathers what validation consults for a repository.
-func (s *Server) planEnv(ctx context.Context, repo Repo, base string) (plan.Env, config.Config, error) {
+func (s *Server) planEnv(ctx context.Context, repo Repo, base, self string) (plan.Env, config.Config, error) {
 	cfg, err := config.Load(repo.Path)
 	if err != nil {
 		return plan.Env{}, cfg, err
@@ -230,7 +230,10 @@ func (s *Server) planEnv(ctx context.Context, repo Repo, base string) (plan.Env,
 	} else {
 		base = config.FullRef(base)
 	}
-	env := plan.Env{Repo: repo.Name, Agents: cfg.AdapterNames()}
+	env := plan.Env{Repo: repo.Name, Agents: cfg.AdapterNames(), Submitting: true}
+	if ts, err := repo.Store.ListTasks(ctx); err == nil {
+		env.Queued = plan.QueuedFrom(ts, api.TaskID(self))
+	}
 	env.TaskPhase = func(id string) (api.Phase, bool) {
 		t, err := repo.Store.GetTask(ctx, api.TaskID(id))
 		return t.Status.Phase, err == nil
@@ -273,7 +276,7 @@ func (s *Server) validatePlan(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	env, _, err := s.planEnv(r.Context(), repo, req.Base)
+	env, _, err := s.planEnv(r.Context(), repo, req.Base, req.PlanTask)
 	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -327,7 +330,7 @@ func (s *Server) submitPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	env, _, err := s.planEnv(ctx, repo, req.Base)
+	env, _, err := s.planEnv(ctx, repo, req.Base, req.PlanTask)
 	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, err.Error())
 		return

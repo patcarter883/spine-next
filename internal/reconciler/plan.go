@@ -46,10 +46,15 @@ func (c *Controller) collectPlan(ctx context.Context, t *api.Task, b api.Budget)
 		if m, ok, err := modmap.Load(ctx, c.WT.Primary(), lease.BaseOID); ok && err == nil {
 			mods = m
 		}
+		var queued []plan.Queued
+		if ts, err := c.Store.ListTasks(ctx); err == nil {
+			queued = plan.QueuedFrom(ts, t.ID)
+		}
 		issues = plan.Validate(p, plan.Env{
 			Repo:    c.Repo,
 			Modules: mods,
 			Agents:  c.Config.AdapterNames(),
+			Queued:  queued,
 			TaskPhase: func(id string) (api.Phase, bool) {
 				x, err := c.Store.GetTask(ctx, api.TaskID(id))
 				return x.Status.Phase, err == nil

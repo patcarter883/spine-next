@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/patcarter883/spine-next/internal/api"
+	"github.com/patcarter883/spine-next/internal/plan"
 	"github.com/patcarter883/spine-next/internal/repoctx"
 )
 
@@ -25,6 +26,8 @@ type Prompt struct {
 	// Agents and Gates list what a planned task may name (planner only).
 	Agents []string
 	Gates  []string
+	// Queued is the work already in the repository (planner only).
+	Queued []plan.Queued
 	// Notes is the repository's .spine/context.md (already capped), for
 	// adapters with context on. Modules is the rendered module map
 	// (planners only).
@@ -121,6 +124,57 @@ func (p Prompt) Render() string {
 	return b.String()
 }
 
+// MaxQueued bounds the queued tasks a planner is shown.
+const MaxQueued = 60
+
+func renderQueued(qs []plan.Queued) string {
+	if len(qs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Work already queued\n\n")
+	b.WriteString("These tasks exist or are proposed by other plans, and will run alongside yours. Do not plan work they already do. ")
+	b.WriteString("When a task of yours needs one of their changes, or would change the same files, list its id in `after` instead of waiting for it: Spine starts your task once that one has landed.\n\n")
+	for i, q := range qs {
+		if i == MaxQueued {
+			fmt.Fprintf(&b, "- … and %d more\n", len(qs)-i)
+			break
+		}
+		state := q.State
+		if q.Plan != "" {
+			state = "proposed by plan " + q.Plan + ", not submitted yet"
+		}
+		fmt.Fprintf(&b, "- `%s` (%s)", q.ID, state)
+		if q.Title != "" {
+			fmt.Fprintf(&b, ": %s", oneLine(q.Title, 100))
+		}
+		if len(q.Scope) > 0 {
+			sc := q.Scope
+			more := ""
+			if len(sc) > 8 {
+				sc, more = sc[:8], fmt.Sprintf(" +%d", len(q.Scope)-8)
+			}
+			fmt.Fprintf(&b, "; scope: %s%s", strings.Join(sc, ", "), more)
+		} else {
+			b.WriteString("; scope: everything")
+		}
+		if len(q.After) > 0 {
+			fmt.Fprintf(&b, "; after: %s", strings.Join(q.After, ", "))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func oneLine(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > n {
+		s = s[:n] + "…"
+	}
+	return s
+}
+
 func (p Prompt) renderPlan() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "spine-task: %s\nspine-attempt: %d\nspine-round: %d\nspine-kind: plan\n\n", p.Task, p.Attempt, p.Round)
@@ -138,7 +192,12 @@ func (p Prompt) renderPlan() string {
 		b.WriteString("# Module map (derived from the code and its history)\n\n" + p.Modules + "\n")
 		b.WriteString("Use module boundaries for scopes, include a module's tests in the scope of a task that changes it, and put modules that usually change together in one task or order them with `after`.\n\n")
 	}
-	b.WriteString("Rules: ids match `[a-z0-9][a-z0-9-]{0,40}` and are unique; `after` names only ids in this plan; there are no cycles; every task has a scope; 1 to 12 tasks.\n")
+	b.WriteString(renderQueued(p.Queued))
+	if len(p.Queued) > 0 {
+		b.WriteString("Rules: ids match `[a-z0-9][a-z0-9-]{0,40}`, are unique, and differ from the queued ids above; `after` names ids in this plan or queued tasks; there are no cycles; every task has a scope; 1 to 12 tasks.\n")
+	} else {
+		b.WriteString("Rules: ids match `[a-z0-9][a-z0-9-]{0,40}` and are unique; `after` names only ids in this plan; there are no cycles; every task has a scope; 1 to 12 tasks.\n")
+	}
 	if len(p.Agents) > 0 {
 		fmt.Fprintf(&b, "A task may set `\"agent\"` to one of: %s (omit it for the default).\n", strings.Join(p.Agents, ", "))
 	}

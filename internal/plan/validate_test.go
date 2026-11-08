@@ -102,3 +102,47 @@ func TestValidateWithModules(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateAgainstQueuedWork(t *testing.T) {
+	running := api.Task{ID: "fix-policy", Spec: api.Spec{Title: "Fix BusinessPolicy", Scope: []string{"app/Policies/**"}}, Status: api.Status{Phase: api.PhaseWorking}}
+	done := api.Task{ID: "old", Spec: api.Spec{Scope: []string{"app/**"}}, Status: api.Status{Phase: api.PhaseIntegrated}}
+	other := api.Task{ID: "plan-b", Spec: api.Spec{Kind: api.KindPlan}, Status: api.Status{Phase: api.PhaseEscalated,
+		Plan: &api.Plan{Tasks: []api.PlanTask{{ID: "b-tests", Scope: []string{"tests/Feature/**"}}}}}}
+	self := api.Task{ID: "plan-a", Spec: api.Spec{Kind: api.KindPlan}, Status: api.Status{Phase: api.PhaseEscalated,
+		Plan: &api.Plan{Tasks: []api.PlanTask{{ID: "mine", Scope: []string{"x/**"}}}}}}
+	queued := QueuedFrom([]api.Task{running, done, other, self}, "plan-a")
+	if len(queued) != 2 || queued[0].ID != "fix-policy" || queued[1].ID != "b-tests" || queued[1].Plan != "plan-b" {
+		t.Fatalf("queued %+v", queued)
+	}
+	phase := func(id string) (api.Phase, bool) {
+		if id == "fix-policy" {
+			return api.PhaseWorking, true
+		}
+		return "", false
+	}
+	p := api.Plan{Tasks: []api.PlanTask{
+		{ID: "after-policy", Intent: "Test the policy once it is fixed", Scope: []string{"app/Policies/BusinessPolicy.php"}, After: []string{"fix-policy"}},
+		{ID: "beside-policy", Intent: "Touch the same policy without waiting", Scope: []string{"app/Policies/**"}},
+		{ID: "after-b", Intent: "Build on the other plan's proposed tests", Scope: []string{"tests/Unit/**"}, After: []string{"b-tests"}},
+	}}
+	is := Validate(p, Env{TaskPhase: phase, Queued: queued})
+	if HasErrors(is) {
+		t.Fatalf("a planner may depend on queued and proposed tasks: %v", is)
+	}
+	for _, sub := range []string{`beside-policy.scope: may run beside task "fix-policy" (Working)`, `after-b.after: "b-tests" is proposed by plan plan-b`} {
+		if !has(is, Warning, sub) {
+			t.Errorf("missing warning %q in:\n%v", sub, is)
+		}
+	}
+	if has(is, Warning, `after-policy.scope: may run beside task "fix-policy"`) {
+		t.Errorf("a task that runs after fix-policy can't run beside it: %v", is)
+	}
+	dup := api.Plan{Tasks: []api.PlanTask{{ID: "b-tests", Intent: "Reuse an id the other plan proposes", Scope: []string{"docs/**"}}}}
+	if is := Validate(dup, Env{TaskPhase: phase, Queued: queued}); !has(is, Warning, `plan plan-b also proposes "b-tests"`) {
+		t.Errorf("id clash with a proposal: %v", is)
+	}
+	is = Validate(p, Env{TaskPhase: phase, Queued: queued, Submitting: true})
+	if !has(is, Error, `"b-tests" is only proposed, by plan plan-b: submit that plan first`) {
+		t.Errorf("submitting before the other plan: %v", is)
+	}
+}

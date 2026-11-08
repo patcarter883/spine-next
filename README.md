@@ -162,6 +162,7 @@ Every other command works the same under the supervisor. `spine run`, `status`, 
 
 **Planning**
 - **Plan:** enter a goal and a planner agent (a task of kind `plan`) writes a breakdown. `spec.validate` sends a broken plan back to it. You then edit tasks, scopes and dependencies, see validation as you type, and submit. Validation checks ids, intents, scope globs, agents, gates, dependencies (including `repo:task`), cycles, and parallel tasks claiming the same paths.
+- **Several plans at once:** the planner is shown the repository's unfinished tasks and the tasks other plans propose that are still awaiting review, with their scopes. It may list them in `after` instead of redoing or racing them. Validation warns when a task may run beside queued work that touches the same paths or modules. A dependency on a task that is only proposed is a warning while planning and an error at submit, so submit plans in dependency order.
 - **Graph:** tasks and `after` links across repositories, with each task's state (running, ready, blocked, needs you, failed, done) and the critical path.
 - **Templates:** saved task shapes, from `.spine/templates.yaml` (shared through git) or saved from the form.
 - **Gates:** the new-task form shows the base's `.spine/gates.yaml`, and you can pin a subset for one task.

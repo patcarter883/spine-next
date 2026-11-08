@@ -13,6 +13,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/gate"
 	"github.com/patcarter883/spine-next/internal/inbox"
+	"github.com/patcarter883/spine-next/internal/plan"
 	"github.com/patcarter883/spine-next/internal/storage"
 	"github.com/patcarter883/spine-next/internal/worktree"
 )
@@ -304,6 +305,9 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 	if t.Spec.Kind == api.KindPlan {
 		prompt.Plan, prompt.Scope, prompt.Agents, prompt.Gates = true, nil, c.Config.AdapterNames(), acceptance
 		prompt.Acceptance = nil
+		if ts, err := c.Store.ListTasks(ctx); err == nil {
+			prompt.Queued = plan.QueuedFrom(ts, t.ID)
+		}
 	}
 	if t.Spec.Kind == api.KindSurvey && round == 0 {
 		if err := c.prepareSurvey(ctx, t, lease.Path, lease.BaseOID); err != nil {

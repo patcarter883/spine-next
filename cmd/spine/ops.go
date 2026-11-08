@@ -148,10 +148,13 @@ func runPlan(ctx context.Context, args []string) error {
 			return err
 		}
 		defer st.Close()
-		env := plan.Env{Agents: cfg.AdapterNames(), TaskPhase: func(id string) (api.Phase, bool) {
+		env := plan.Env{Agents: cfg.AdapterNames(), Submitting: true, TaskPhase: func(id string) (api.Phase, bool) {
 			t, err := st.GetTask(ctx, api.TaskID(id))
 			return t.Status.Phase, err == nil
 		}}
+		if ts, err := st.ListTasks(ctx); err == nil {
+			env.Queued = plan.QueuedFrom(ts, "")
+		}
 		gc, gerr := func() (gate.Config, error) {
 			c, ok, err := gate.LoadConfig(ctx, primary, cfg.Base)
 			if !ok && err == nil {

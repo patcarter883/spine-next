@@ -10,6 +10,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/modmap"
@@ -78,12 +79,13 @@ type Env struct {
 // Queued is a task that is not finished, or that a plan awaiting review
 // proposes (Plan is then that planner task's id).
 type Queued struct {
-	ID    string   `json:"id"`
-	Title string   `json:"title,omitempty"`
-	State string   `json:"state"`
-	Scope []string `json:"scope,omitempty"`
-	After []string `json:"after,omitempty"`
-	Plan  string   `json:"plan,omitempty"`
+	ID      string    `json:"id"`
+	Title   string    `json:"title,omitempty"`
+	State   string    `json:"state"`
+	Scope   []string  `json:"scope,omitempty"`
+	After   []string  `json:"after,omitempty"`
+	Plan    string    `json:"plan,omitempty"`
+	Created time.Time `json:"created"`
 }
 
 // QueuedFrom lists the unfinished tasks and the tasks proposed by plans
@@ -100,11 +102,11 @@ func QueuedFrom(ts []api.Task, self api.TaskID) []Queued {
 				continue
 			}
 			for _, pt := range t.Status.Plan.Tasks {
-				out = append(out, Queued{ID: strings.TrimSpace(pt.ID), Title: pt.Title, State: "proposed", Scope: pt.Scope, After: pt.After, Plan: string(t.ID)})
+				out = append(out, Queued{ID: strings.TrimSpace(pt.ID), Title: pt.Title, State: "proposed", Scope: pt.Scope, After: pt.After, Plan: string(t.ID), Created: t.CreatedAt})
 			}
 		case api.KindSurvey:
 		default:
-			q := Queued{ID: string(t.ID), Title: t.Spec.Title, State: string(t.Status.Phase), Scope: t.Spec.Scope}
+			q := Queued{ID: string(t.ID), Title: t.Spec.Title, State: string(t.Status.Phase), Scope: t.Spec.Scope, Created: t.CreatedAt}
 			for _, d := range t.Spec.DependsOn {
 				q.After = append(q.After, string(d))
 			}
@@ -292,7 +294,7 @@ func Validate(p api.Plan, env Env) []Issue {
 				if q.Plan != "" {
 					what = fmt.Sprintf("%q, proposed by plan %s", q.ID, q.Plan)
 				}
-				if why, ok := clash(env.Modules, q.Scope, t.Scope); ok {
+				if why, ok := clash(nil, q.Scope, t.Scope); ok {
 					add(Warning, t.ID, "scope", "may run beside %s%s", what, why)
 				}
 			}
@@ -339,6 +341,9 @@ func coChanged(m *modmap.Map, a, b map[string]bool) (modmap.Pair, bool) {
 	found := false
 	for x := range a {
 		for y := range b {
+			if x == "." || y == "." {
+				continue
+			}
 			if p, ok := m.Pair(x, y); ok && (!found || p.Commits > best.Commits) {
 				best, found = p, true
 			}
@@ -472,6 +477,72 @@ func Reach(p api.Plan) map[string]map[string]bool {
 		walk(t.ID, t.ID, 0)
 	}
 	return out
+}
+
+// Link is an `after` link AutoLink added.
+type Link struct {
+	Task  string `json:"task"`
+	After string `json:"after"`
+	Paths string `json:"paths"`
+}
+
+// AutoLink orders tasks whose scopes can change the same paths, adding
+// `after` links instead of leaving them to run side by side: a later task
+// in the plan after an earlier one, and any task after unfinished work and
+// after tasks that plans older than since propose. Older work never waits
+// for newer, so plans linked this way cannot form a cycle.
+func AutoLink(p *api.Plan, queued []Queued, since time.Time) []Link {
+	var out []Link
+	link := func(t *api.PlanTask, after, g, h string) {
+		t.After = append(t.After, after)
+		paths := g
+		if h != g {
+			paths = g + " / " + h
+		}
+		out = append(out, Link{Task: strings.TrimSpace(t.ID), After: after, Paths: paths})
+	}
+	ids := map[string]bool{}
+	for _, t := range p.Tasks {
+		ids[strings.TrimSpace(t.ID)] = true
+	}
+	for j := range p.Tasks {
+		b := &p.Tasks[j]
+		for i := 0; i < j; i++ {
+			a := p.Tasks[i]
+			reach := Reach(*p)
+			if reach[a.ID][b.ID] || reach[b.ID][a.ID] {
+				continue
+			}
+			if g, h, ok := overlap(a.Scope, b.Scope); ok {
+				link(b, strings.TrimSpace(a.ID), g, h)
+			}
+		}
+	}
+	for j := range p.Tasks {
+		t := &p.Tasks[j]
+		for _, q := range queued {
+			if ids[q.ID] || (q.Plan != "" && !q.Created.Before(since)) {
+				continue
+			}
+			if queuedReach(*p, queued)[strings.TrimSpace(t.ID)][q.ID] {
+				continue
+			}
+			if g, h, ok := overlap(q.Scope, t.Scope); ok {
+				link(t, q.ID, g, h)
+			}
+		}
+	}
+	return out
+}
+
+// LinkNotes describes AutoLink's links for a person reviewing the plan.
+func LinkNotes(links []Link) string {
+	var b strings.Builder
+	b.WriteString("Spine ordered tasks that can change the same paths:")
+	for _, l := range links {
+		fmt.Fprintf(&b, "\n- %s after %s (%s)", l.Task, l.After, l.Paths)
+	}
+	return b.String()
 }
 
 // clash says why two tasks' scopes may conflict when they run side by side.

@@ -3,6 +3,7 @@ package plan
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/modmap"
@@ -144,5 +145,51 @@ func TestValidateAgainstQueuedWork(t *testing.T) {
 	is = Validate(p, Env{TaskPhase: phase, Queued: queued, Submitting: true})
 	if !has(is, Error, `"b-tests" is only proposed, by plan plan-b: submit that plan first`) {
 		t.Errorf("submitting before the other plan: %v", is)
+	}
+}
+
+func TestAutoLink(t *testing.T) {
+	now := time.Now()
+	queued := []Queued{
+		{ID: "running", State: "Working", Scope: []string{"app/Policies/**"}, Created: now.Add(-time.Hour)},
+		{ID: "older-proposal", State: "proposed", Plan: "plan-old", Scope: []string{"tests/Feature/Business/**"}, Created: now.Add(-time.Minute)},
+		{ID: "newer-proposal", State: "proposed", Plan: "plan-new", Scope: []string{"tests/Unit/**"}, Created: now.Add(time.Minute)},
+		{ID: "elsewhere", State: "Pending", Scope: []string{"docs/**"}},
+	}
+	p := api.Plan{Tasks: []api.PlanTask{
+		{ID: "policy", Scope: []string{"app/Policies/BusinessPolicy.php"}},
+		{ID: "policy-again", Scope: []string{"app/Policies/**", "tests/Unit/Foo.php"}},
+		{ID: "business-tests", Scope: []string{"tests/Feature/Business/CrossTenantTest.php"}},
+		{ID: "independent", Scope: []string{"resources/**"}},
+	}}
+	links := AutoLink(&p, queued, now)
+	got := map[string][]string{}
+	for _, tk := range p.Tasks {
+		got[tk.ID] = tk.After
+	}
+	want := map[string][]string{
+		"policy":         {"running"},
+		"policy-again":   {"policy"},
+		"business-tests": {"older-proposal"},
+		"independent":    nil,
+	}
+	for id, w := range want {
+		if strings.Join(got[id], ",") != strings.Join(w, ",") {
+			t.Errorf("%s after %v, want %v", id, got[id], w)
+		}
+	}
+	if len(links) != 3 || !strings.Contains(LinkNotes(links), "- policy-again after policy (app/Policies/BusinessPolicy.php / app/Policies/**)") {
+		t.Fatalf("links %+v\n%s", links, LinkNotes(links))
+	}
+	if again := AutoLink(&p, queued, now); len(again) != 0 {
+		t.Fatalf("linking twice adds nothing: %+v", again)
+	}
+	for _, i := range Validate(p, Env{Queued: queued}) {
+		if i.Field == "after" {
+			t.Errorf("links must be valid: %v", i)
+		}
+	}
+	if len(Cycle(p)) > 0 {
+		t.Fatal("links made a cycle")
 	}
 }

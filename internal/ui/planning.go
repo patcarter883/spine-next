@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
@@ -286,6 +287,36 @@ func (s *Server) validatePlan(w http.ResponseWriter, r *http.Request) {
 		is = []plan.Issue{}
 	}
 	writeJSON(w, map[string]any{"issues": is, "ok": !plan.HasErrors(is), "order": topo(req.Plan)})
+}
+
+// linkPlan adds `after` links between tasks that can change the same paths,
+// as the controller does for a planner's plan.
+func (s *Server) linkPlan(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	var req planBody
+	if !decode(w, r, &req) {
+		return
+	}
+	since := time.Now()
+	if req.PlanTask != "" {
+		if pt, err := repo.Store.GetTask(r.Context(), api.TaskID(req.PlanTask)); err == nil {
+			since = pt.CreatedAt
+		}
+	}
+	ts, err := repo.Store.ListTasks(r.Context())
+	if err != nil {
+		httpError(w, 500, err.Error())
+		return
+	}
+	links := plan.AutoLink(&req.Plan, plan.QueuedFrom(ts, api.TaskID(req.PlanTask)), since)
+	if links == nil {
+		links = []plan.Link{}
+	}
+	writeJSON(w, map[string]any{"plan": req.Plan, "links": links})
 }
 
 // topo orders plan task ids so dependencies come first (cycles last).

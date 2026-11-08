@@ -166,6 +166,7 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/templates/{name}", s.need(auth.Operator, s.deleteTemplate))
 	m.HandleFunc("POST /api/repos/{repo}/plans", s.need(auth.Operator, s.startPlan))
 	m.HandleFunc("POST /api/repos/{repo}/plans/validate", s.validatePlan)
+	m.HandleFunc("POST /api/repos/{repo}/plans/link", s.linkPlan)
 	m.HandleFunc("POST /api/repos/{repo}/plans/submit", s.need(auth.Operator, s.submitPlan))
 	m.HandleFunc("GET /api/graph", s.graph)
 	m.HandleFunc("POST /api/repos/{repo}/gates/check", s.need(auth.Operator, s.gatesCheck))

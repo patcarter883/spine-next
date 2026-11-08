@@ -50,6 +50,10 @@ func (c *Controller) collectPlan(ctx context.Context, t *api.Task, b api.Budget)
 		if ts, err := c.Store.ListTasks(ctx); err == nil {
 			queued = plan.QueuedFrom(ts, t.ID)
 		}
+		if links := plan.AutoLink(&p, queued, t.CreatedAt); len(links) > 0 {
+			p.Notes = strings.TrimSpace(p.Notes + "\n\n" + plan.LinkNotes(links))
+			c.event(t.ID, "plan_linked", map[string]any{"links": links})
+		}
 		issues = plan.Validate(p, plan.Env{
 			Repo:    c.Repo,
 			Modules: mods,

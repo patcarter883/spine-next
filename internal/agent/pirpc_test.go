@@ -209,3 +209,27 @@ func TestLoadPiProviderAndKeys(t *testing.T) {
 		t.Fatal("commands must be refused")
 	}
 }
+
+func TestPiProviderKeyReachesAgent(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "models.json"), []byte(`{"providers":{"local":{"baseUrl":"http://h/v1","api":"openai-completions","apiKey":"$SPINE_TEST_LOCAL_KEY"}}}`), 0o600)
+	t.Setenv("SPINE_TEST_LOCAL_KEY", "local-secret")
+	t.Setenv("OPENROUTER_API_KEY", "or-secret")
+	t.Setenv("OPENAI_API_KEY", "oa-secret")
+	base := Adapter{Protocol: "pi-rpc", PassEnv: []string{"LANG"}, Env: map[string]string{PiAgentDirEnv: dir}, Container: &Container{Image: "x"}}
+	with := func(model string) []string { a := base; a.Model = model; return buildEnv(a) }
+	if env := with("openrouter/z-ai/glm-5.3"); !slices.Contains(env, "OPENROUTER_API_KEY=or-secret") || slices.Contains(env, "OPENAI_API_KEY=oa-secret") {
+		t.Fatalf("a built-in provider gets its own key and no other: %v", env)
+	}
+	if env := with("local/m"); !slices.Contains(env, "SPINE_TEST_LOCAL_KEY=local-secret") {
+		t.Fatalf("a models.json provider gets the variable its apiKey names: %v", env)
+	}
+	a := base
+	a.Model, a.PassEnv = "openrouter/m", []string{"OPENROUTER_API_KEY"}
+	if n := len(slices.DeleteFunc(buildEnv(a), func(s string) bool { return !strings.HasPrefix(s, "OPENROUTER_API_KEY=") })); n != 1 {
+		t.Fatalf("passed once, got %d", n)
+	}
+	if env := buildEnv(Adapter{Protocol: "acp", Model: "openrouter/m"}); slices.Contains(env, "OPENROUTER_API_KEY=or-secret") {
+		t.Fatal("only Pi adapters get provider keys this way")
+	}
+}

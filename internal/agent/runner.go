@@ -490,6 +490,16 @@ func buildEnv(a Adapter) []string {
 			env = append(env, k+"="+v)
 		}
 	}
+	if a.Protocol == "pi-rpc" {
+		for _, k := range PiKeyEnvs(a) {
+			if _, set := a.Env[k]; set || slices.Contains(pass, k) {
+				continue
+			}
+			if v, ok := os.LookupEnv(k); ok {
+				env = append(env, k+"="+v)
+			}
+		}
+	}
 	// Whatever pass_env says, a host-run Pi reads the agent dir Spine resolves
 	// (a containerized one gets its private copy instead).
 	if a.Protocol == "pi-rpc" && a.Container == nil {

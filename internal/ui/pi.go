@@ -174,15 +174,14 @@ func piProviders(doc map[string]any) []piProvider {
 func piWarnings(a agent.Adapter, provs []piProvider) []string {
 	var out []string
 	for _, p := range provs {
-		if p.Key.Kind != "env" {
+		if p.Key.Kind != "env" || p.Name != agent.PiProviderName(a) {
 			continue
 		}
-		pass := a.PassEnv
-		if pass == nil {
-			pass = agent.DefaultPassEnv
+		if _, ok := a.Env[p.Key.Env]; ok {
+			continue
 		}
-		if _, ok := a.Env[p.Key.Env]; !ok && !slices.Contains(pass, p.Key.Env) {
-			out = append(out, fmt.Sprintf("provider %s reads $%s, which this adapter does not pass to Pi: add it to the adapter's pass_env (with the defaults you still need) or env in %s", p.Name, p.Key.Env, config.Path))
+		if _, ok := os.LookupEnv(p.Key.Env); !ok {
+			out = append(out, fmt.Sprintf("provider %s reads $%s, which is not set where Spine runs: set it in the supervisor's environment, or in the adapter's env in %s", p.Name, p.Key.Env, config.Path))
 		}
 	}
 	if a.Model == "" {

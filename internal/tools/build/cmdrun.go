@@ -292,8 +292,9 @@ func (r *Runner) run(ctx context.Context, root string, a Args) (tools.Result, er
 		defer art.Abort()
 	}
 	var artMu sync.Mutex
-	stdout := &capture{max: maxOut, mu: &artMu}
-	stderr := &capture{max: maxOut, mu: &artMu}
+	tail := &tailBuffer{max: tools.MaxOutputTailBytes}
+	stdout := &capture{max: maxOut, mu: &artMu, tail: tail}
+	stderr := &capture{max: maxOut, mu: &artMu, tail: tail}
 	if art != nil { // a nil *Writer in an io.Writer field is not nil
 		stdout.tee, stderr.tee = art, art
 	}
@@ -370,6 +371,9 @@ func (r *Runner) run(ctx context.Context, root string, a Args) (tools.Result, er
 			res.Unparsed = res.ExitCode != 0
 		}
 	}
+	if res.ExitCode != 0 && !slices.ContainsFunc(res.Diagnostics, func(d tools.Diagnostic) bool { return d.Severity == tools.Error }) {
+		res.OutputTail = tail.text(root)
+	}
 	return res, nil
 }
 
@@ -391,15 +395,19 @@ type capture struct {
 	buf  bytes.Buffer
 	over bool
 	tee  io.Writer
+	tail *tailBuffer
 	mu   *sync.Mutex
 }
 
 func (c *capture) Write(p []byte) (int, error) {
+	c.mu.Lock()
 	if c.tee != nil {
-		c.mu.Lock()
 		c.tee.Write(p)
-		c.mu.Unlock()
 	}
+	if c.tail != nil {
+		c.tail.write(p)
+	}
+	c.mu.Unlock()
 	room := c.max - c.buf.Len()
 	if room <= 0 {
 		c.over = c.over || len(p) > 0
@@ -411,4 +419,34 @@ func (c *capture) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return c.buf.Write(p)
+}
+
+// tailBuffer keeps the last max bytes written to it, across both streams.
+type tailBuffer struct {
+	max int
+	b   []byte
+}
+
+func (t *tailBuffer) write(p []byte) {
+	t.b = append(t.b, p...)
+	if n := len(t.b); n > 2*t.max {
+		t.b = append(t.b[:0], t.b[n-t.max:]...)
+	}
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// text is the kept output without terminal escapes or the run's root path.
+func (t *tailBuffer) text(root string) string {
+	b := t.b
+	if len(b) > t.max {
+		b = b[len(b)-t.max:]
+	}
+	s := strings.ToValidUTF8(string(b), "")
+	s = ansiRe.ReplaceAllString(s, "")
+	if root != "" {
+		s = strings.ReplaceAll(s, root+"/", "")
+		s = strings.ReplaceAll(s, root, ".")
+	}
+	return strings.TrimSpace(s)
 }

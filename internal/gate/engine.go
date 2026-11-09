@@ -141,7 +141,7 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 	for _, name := range cfg.Order {
 		g := cfg.Gates[name]
 		if !v.Passed {
-			v.Gates = append(v.Gates, api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, Skipped: true, ExitCode: 1, Reason: "EarlierGateFailed"})
+			v.Gates = append(v.Gates, api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, Stage: g.Stage, Skipped: true, ExitCode: 1, Reason: "EarlierGateFailed"})
 			continue
 		}
 		args := gateArgs(g, req.Scope)
@@ -153,7 +153,7 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 			if err != nil {
 				return api.GateVerdict{}, false, fmt.Errorf("gate %s: %w", name, err)
 			}
-			gv := api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, ToolExitCode: cur.ExitCode,
+			gv := api.GateVerdict{Gate: name, Tool: g.Tool, Policy: g.Policy, Stage: g.Stage, ToolExitCode: cur.ExitCode,
 				Metrics: cur.Metrics, Cached: cur.Cached, Duration: cur.Duration, Artifacts: cur.Artifacts}
 			if g.Policy == api.BaselineRelative {
 				var base *tools.Result
@@ -177,6 +177,9 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 				baselineVerdict(&gv, base, cur)
 			} else {
 				absoluteVerdict(&gv, cur)
+			}
+			if !gv.Passed() && len(gv.New) == 0 {
+				gv.OutputTail = cur.OutputTail
 			}
 			return gv, cur.Cached, nil
 		}

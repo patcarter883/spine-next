@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,5 +121,37 @@ func TestCmdRunChangedFiles(t *testing.T) {
 	}
 	if res := run(change, docsOnly, "--test", "{changed:**/*.php}"); res.Cached {
 		t.Fatal("the same tree measured against another base must not reuse the result")
+	}
+}
+
+func TestUnparsedFailureKeepsTheEndOfItsOutput(t *testing.T) {
+	ctx := context.Background()
+	reg := tools.New(tools.Options{Cache: tools.NewMemCache()})
+	reg.MustRegister((&Runner{}).Tools()...)
+	dir := t.TempDir()
+	script := "i=0; while [ $i -lt 2000 ]; do echo \"noise line $i\"; i=$((i+1)); done; printf '\\033[31mFatal: cannot redeclare iaSowing() in %s/tests/Pest.php\\033[0m\\n' \"$PWD\" >&2; exit 255"
+	args, _ := json.Marshal(Args{Argv: []string{"sh", "-c", script}, Parser: "pytest-junit", Report: "{tmp}/missing.xml"})
+	res, err := reg.Invoke(ctx, "cmd.run", tools.Invocation{Tree: "t-tail", Dir: dir, Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Unparsed || res.ExitCode != 255 {
+		t.Fatalf("%+v", res)
+	}
+	want := "Fatal: cannot redeclare iaSowing() in tests/Pest.php"
+	if !strings.HasSuffix(res.OutputTail, want) {
+		t.Fatalf("tail ends %q", res.OutputTail[max(0, len(res.OutputTail)-120):])
+	}
+	if len(res.OutputTail) > tools.MaxOutputTailBytes || strings.Contains(res.OutputTail, "noise line 0\n") {
+		t.Fatalf("tail is %d bytes and keeps the start", len(res.OutputTail))
+	}
+
+	args, _ = json.Marshal(Args{Argv: []string{"sh", "-c", "echo 'x.go:3:1: boom'; exit 1"}, Parser: "go-build"})
+	res, err = reg.Invoke(ctx, "cmd.run", tools.Invocation{Tree: "t-diag", Dir: dir, Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Diagnostics) == 0 || res.OutputTail != "" {
+		t.Fatalf("a failure with diagnostics needs no tail: %+v", res)
 	}
 }

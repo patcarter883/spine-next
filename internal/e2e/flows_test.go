@@ -260,3 +260,54 @@ func TestPassedMergeCheckSurvivesRestart(t *testing.T) {
 		}
 	}
 }
+
+// A merge-stage gate is left out of every round and runs on the merge
+// result. Its failure goes back to the agent as its own to fix, not as a
+// moved base, and the patched change lands once it passes.
+func TestMergeStageGateRunsOnlyOnTheMergeResult(t *testing.T) {
+	plan := map[string]map[string]any{"m": {
+		"a1r0": map[string]any{"write": map[string]string{"pkg/m.go": goFile("M"), "flag.txt": "no\n"}},
+		"a1r1": map[string]any{"write": map[string]string{"flag.txt": "ok\n"}},
+	}}
+	h := newHarness(t, plan, 2)
+	h.repo.Write(map[string]string{".spine/gates.yaml": strings.Replace(gates, "order: [scope, nonempty, build, unit]\n", "", 1) +
+		"  slow:     {tool: cmd.run, stage: merge, args: {argv: [grep, -qx, ok, flag.txt]}}\norder: [scope, nonempty, build, unit, slow]\n"})
+	h.repo.Commit("merge-stage gate")
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	s := spec("add M", "pkg/**", "flag.txt")
+	inbox.Write(inbox.Dir(a.CommonDir), inbox.Command{Kind: inbox.Submit, Task: "m", Spec: &s})
+	tk := waitPhase(t, a, "m", api.PhaseIntegrated, "")
+	if tk.Status.PatchRound != 1 || tk.Status.Attempt != 1 {
+		t.Fatalf("want one patch round in attempt 1: a%d r%d", tk.Status.Attempt, tk.Status.PatchRound)
+	}
+	var rounds, merges int
+	evs, _ := a.Store.ListEvents(context.Background(), "m", 0, 0)
+	for _, e := range evs {
+		d := string(e.Data)
+		switch e.Kind {
+		case "verdict":
+			if strings.Contains(d, `"on_merge":true`) {
+				merges++
+				if !strings.Contains(d, `"gate":"slow"`) {
+					t.Fatalf("merge check without the merge-stage gate: %s", d)
+				}
+			} else {
+				rounds++
+				if strings.Contains(d, `"gate":"slow"`) {
+					t.Fatalf("a round ran the merge-stage gate: %s", d)
+				}
+			}
+		case "decision":
+			if strings.Contains(d, "FailsOnNewBase") {
+				t.Fatalf("a merge-stage failure is the change's, not the base's: %s", d)
+			}
+		}
+	}
+	if rounds != 2 || merges != 2 {
+		dumpEvents(t, a.Store, "m")
+		t.Fatalf("want 2 round verdicts and 2 merge checks, have %d and %d", rounds, merges)
+	}
+}

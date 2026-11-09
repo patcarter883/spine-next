@@ -351,6 +351,12 @@ func clampResult(res *Result) {
 	for i := range res.Diagnostics {
 		res.Diagnostics[i].Message = TruncateUTF8(res.Diagnostics[i].Message, MaxMessageBytes)
 	}
+	if n := len(res.OutputTail); n > MaxOutputTailBytes {
+		res.OutputTail = res.OutputTail[n-MaxOutputTailBytes:]
+		for len(res.OutputTail) > 0 && !utf8.RuneStart(res.OutputTail[0]) {
+			res.OutputTail = res.OutputTail[1:]
+		}
+	}
 	if res.Diagnostics == nil {
 		res.Diagnostics = []Diagnostic{}
 	}

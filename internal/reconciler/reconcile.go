@@ -91,7 +91,7 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 			if g.Passed {
 				return c.integrate(ctx, &t, b, snap)
 			}
-			return c.decide(ctx, &t, b, snap, nil, true)
+			return c.decide(ctx, &t, b, snap, nil, !failedAtMergeStage(g))
 		}
 		if g == nil || g.OnMerge || g.Commit != snap.Commit {
 			return c.startGate(ctx, &t, snap, "", "", false)
@@ -432,6 +432,9 @@ func (c *Controller) startGate(ctx context.Context, t *api.Task, snap *api.Snaps
 	if err != nil {
 		return c.escalate(ctx, t, "BadGateConfig", err.Error())
 	}
+	if !onMerge {
+		cfg = cfg.ForRound()
+	}
 	attempt, round := t.Status.Attempt, t.Status.PatchRound
 	if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
 		s.Phase, s.Reason, s.Message = api.PhaseVerifying, "GateRunning", ""
@@ -499,6 +502,17 @@ func (c *Controller) startGate(ctx context.Context, t *api.Task, snap *api.Snaps
 		c.event(id, "verdict", map[string]any{"on_merge": onMerge, "attempt": attempt, "round": round, "verdict": v})
 	})
 	return Result{}, nil
+}
+
+// failedAtMergeStage reports whether g failed on a gate that runs only on
+// the merge result: the change, not the new base, is what it judged.
+func failedAtMergeStage(g *api.GateSummary) bool {
+	for _, v := range g.Gates {
+		if v.Gate == g.FailedGate {
+			return v.Stage == api.StageMerge
+		}
+	}
+	return false
 }
 
 func gateReason(v gate.Verdict) string {
@@ -578,6 +592,16 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 	g := t.Status.LastGate
 	if g == nil || !g.Passed || g.Tree != pre.ResultTree {
 		return c.startGate(ctx, t, snap, proposed, tip, true)
+	}
+	if !g.OnMerge {
+		cfg, err := c.gateConfig(ctx, t, tip)
+		if err != nil {
+			c.mergeDone(t)
+			return c.escalate(ctx, t, "BadGateConfig", err.Error())
+		}
+		if cfg.HasMergeStage() {
+			return c.startGate(ctx, t, snap, proposed, tip, true)
+		}
 	}
 	if !t.Status.IsTrue(api.CondVerified) || t.Status.Phase != api.PhaseVerified {
 		if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceGate, func(s *api.Status) error {
@@ -743,6 +767,7 @@ func feedback(o Observation, d api.Decision) []api.Feedback {
 			fb := api.Feedback{Source: src, Diagnostics: ds}
 			if len(ds) == 0 {
 				fb.Hint = "The check failed without structured diagnostics (" + g.Reason + ")."
+				fb.Output = g.OutputTail
 			}
 			out = append(out, fb)
 		}

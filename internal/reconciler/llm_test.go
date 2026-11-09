@@ -176,3 +176,28 @@ func TestLLMSupervisorProviderFailures(t *testing.T) {
 		t.Errorf("command key: %v", err)
 	}
 }
+
+func TestUnparsedFailureOutputReachesSupervisorAndAgent(t *testing.T) {
+	o := obs()
+	o.Gate = &api.GateSummary{FailedGate: "pest", Gates: []api.GateVerdict{
+		{Gate: "pint", Tool: "cmd.run"},
+		{Gate: "pest", Tool: "cmd.run", ExitCode: 1, Reason: "UnparsedFailure", OutputTail: "PHP Fatal error: Cannot redeclare iaSowing()"},
+	}}
+	b, err := observationJSON(o, api.Decision{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	if m["failed_gate_output_tail"] != "PHP Fatal error: Cannot redeclare iaSowing()" || m["failed_gate_reason"] != "UnparsedFailure" {
+		t.Fatalf("observation: %s", b)
+	}
+	fb := feedback(o, api.Decision{})
+	if len(fb) != 1 || fb[0].Output != "PHP Fatal error: Cannot redeclare iaSowing()" {
+		t.Fatalf("feedback: %+v", fb)
+	}
+	out := agent.Prompt{Task: "t", Attempt: 1, Round: 2, Intent: "x", Feedback: fb}.Render()
+	if !strings.Contains(out, "The end of its output:\n\n```\nPHP Fatal error: Cannot redeclare iaSowing()\n```") {
+		t.Fatalf("prompt:\n%s", out)
+	}
+}

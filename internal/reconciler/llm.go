@@ -65,7 +65,7 @@ const llmSystem = `You are the supervisor of an automated coding pipeline. A cod
 - Escalate: hand the task to a human with a short reason. Best when the task looks underspecified, impossible within its scope, or the failures are outside the agent's control (infrastructure, flaky tests, pre-existing breakage).
 - Abandon: mark the task failed. Only when continuing is clearly pointless.
 
-Use the counts and diagnostics; prefer the cheapest action likely to succeed. "hint" is one or two sentences of concrete guidance for the agent (empty if none); never claim the work passed. "focus" lists fingerprints from the new diagnostics the agent should fix first (may be empty). "reason" is a short CamelCase code such as Regression, NoProgress, LocalFix, Underspecified.`
+Use the counts and diagnostics; prefer the cheapest action likely to succeed. When a gate failed without diagnostics, failed_gate_output_tail is the end of its output: read it before deciding. Call a failure pre-existing, flaky or infrastructure only when that output (or the diagnostics) shows it, for example a missing service or a crash outside the changed files; a crash in code the task touched, or output you cannot explain, is the agent's to fix. "hint" is one or two sentences of concrete guidance for the agent (empty if none); never claim the work passed. "focus" lists fingerprints from the new diagnostics the agent should fix first (may be empty). "reason" is a short CamelCase code such as Regression, NoProgress, LocalFix, Underspecified.`
 
 type llmDecision struct {
 	Action string   `json:"action"`
@@ -122,6 +122,12 @@ func observationJSON(o Observation, suggestion api.Decision) ([]byte, error) {
 		out["failed_gate"] = g.FailedGate
 		out["new_failure_count"] = g.NewCount
 		out["new_diagnostics"] = ds
+		for _, v := range g.Gates {
+			if v.Gate == g.FailedGate && v.OutputTail != "" {
+				out["failed_gate_reason"] = v.Reason
+				out["failed_gate_output_tail"] = trunc(v.OutputTail, 3000)
+			}
+		}
 	}
 	return json.MarshalIndent(out, "", " ")
 }

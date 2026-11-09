@@ -126,6 +126,9 @@ type Result struct {
 	// Unparsed is set when the tool failed but its output could not be
 	// turned into diagnostics; baseline policy never excuses it.
 	Unparsed bool `json:"unparsed,omitempty"`
+	// OutputTail is the end of a failing run's output when the run produced
+	// no error diagnostics, so whoever acts on the failure can see why.
+	OutputTail string `json:"output_tail,omitempty"`
 	// NoCache marks results that must not be cached even for a cacheable
 	// tool (e.g. a run cut off by its timeout).
 	NoCache bool `json:"-"`
@@ -157,6 +160,7 @@ var (
 
 // Limits applied by the registry to every result.
 const (
-	MaxMessageBytes = 2 << 10
-	MaxDiagnostics  = 500
+	MaxMessageBytes    = 2 << 10
+	MaxDiagnostics     = 500
+	MaxOutputTailBytes = 4 << 10
 )

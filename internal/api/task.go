@@ -231,6 +231,9 @@ type Feedback struct {
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 	Conflicts   []string     `json:"conflicts,omitempty"`
 	Hint        string       `json:"hint,omitempty"` // ≤500 chars
+	// Output is the end of the check's output when it failed without
+	// diagnostics.
+	Output string `json:"output,omitempty"`
 }
 
 // Status is observed state (RFC §3.1).

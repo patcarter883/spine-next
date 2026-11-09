@@ -114,6 +114,9 @@ func (p Prompt) Render() string {
 			if n := len(f.Diagnostics) - len(ds); n > 0 {
 				fmt.Fprintf(&b, "- … and %d more\n", n)
 			}
+			if out := strings.TrimSpace(f.Output); out != "" {
+				fmt.Fprintf(&b, "\nThe end of its output:\n\n```\n%s\n```\n", strings.ReplaceAll(out, "```", "'''"))
+			}
 		}
 	}
 	cs := append(append([]string{}, DefaultConstraints...), p.Constraints...)
@@ -279,6 +282,9 @@ func DescribeGate(g api.GateRef) string {
 	}
 	if g.Policy == api.BaselineRelative {
 		desc += " (pre-existing failures are tolerated; new ones are not)"
+	}
+	if g.Stage == api.StageMerge {
+		desc += " (run when the change merges, not after every round; run it yourself if your change could affect it)"
 	}
 	return fmt.Sprintf("%s: %s", g.Name, desc)
 }

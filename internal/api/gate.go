@@ -46,7 +46,13 @@ type GateRef struct {
 	Args    map[string]any `json:"args,omitempty" yaml:"args,omitempty"`
 	Policy  GatePolicy     `json:"policy,omitempty" yaml:"policy,omitempty"`
 	Timeout time.Duration  `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// Stage is StageMerge for a gate that runs only on the merge result, at
+	// the head of the merge queue; empty runs it on every round too.
+	Stage string `json:"stage,omitempty" yaml:"stage,omitempty"`
 }
+
+// StageMerge marks a gate too slow or too stateful to run every round.
+const StageMerge = "merge"
 
 // GateVerdict is the gate engine's decision for one gate. Only the gate
 // engine produces it (RFC §4.3).
@@ -54,6 +60,7 @@ type GateVerdict struct {
 	Gate     string     `json:"gate"`
 	Tool     string     `json:"tool"`
 	Policy   GatePolicy `json:"policy"`
+	Stage    string     `json:"stage,omitempty"`
 	ExitCode int        `json:"exit_code"` // 0 = pass
 	Skipped  bool       `json:"skipped,omitempty"`
 	// ToolExitCode is the raw exit code on the evaluated tree; BaseExitCode
@@ -67,6 +74,9 @@ type GateVerdict struct {
 	Cached       bool               `json:"cached"`
 	Duration     time.Duration      `json:"duration_ns"`
 	Reason       string             `json:"reason,omitempty"` // CamelCase machine reason
+	// OutputTail is the end of the tool's output for a failure that has no
+	// diagnostics to show.
+	OutputTail string `json:"output_tail,omitempty"`
 	// Artifacts are the full tool logs in the artifact store (the run on the
 	// evaluated tree, and "base-..." for the baseline run).
 	Artifacts []ArtifactRef `json:"artifacts,omitempty"`

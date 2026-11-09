@@ -41,6 +41,7 @@ type rawGate struct {
 	Args    map[string]any `yaml:"args"`
 	Policy  string         `yaml:"policy"`
 	Timeout string         `yaml:"timeout"`
+	Stage   string         `yaml:"stage"`
 }
 
 type rawConfig struct {
@@ -75,6 +76,13 @@ func ParseConfig(b []byte) (Config, error) {
 			}
 			ref.Timeout = d
 		}
+		switch g.Stage {
+		case "", "round":
+		case api.StageMerge:
+			ref.Stage = api.StageMerge
+		default:
+			return Config{}, fmt.Errorf("gate: %s: unknown stage %q (round or merge)", name, g.Stage)
+		}
 		if ref.Tool == "" {
 			return Config{}, fmt.Errorf("gate: %s: no tool", name)
 		}
@@ -102,6 +110,28 @@ func ParseConfig(b []byte) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// HasMergeStage reports whether any gate runs only on the merge result.
+func (c Config) HasMergeStage() bool {
+	for _, n := range c.Order {
+		if c.Gates[n].Stage == api.StageMerge {
+			return true
+		}
+	}
+	return false
+}
+
+// ForRound drops the gates that run only on the merge result.
+func (c Config) ForRound() Config {
+	out := Config{Gates: map[string]api.GateRef{}, Baseline: c.Baseline}
+	for _, n := range c.Order {
+		if g := c.Gates[n]; g.Stage != api.StageMerge {
+			out.Gates[n] = g
+			out.Order = append(out.Order, n)
+		}
+	}
+	return out
 }
 
 // FromRefs builds a Config from a Spec's acceptance list, in order.

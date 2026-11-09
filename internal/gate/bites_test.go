@@ -59,6 +59,25 @@ func TestBitesNeedsTestsThatFailWithoutTheChange(t *testing.T) {
 			t.Errorf("%s: %+v", name, g.New)
 		}
 	}
+	parsed := func(script string) Config {
+		c, err := FromRefs([]api.GateRef{{Name: "bites", Tool: "test.bites", Args: map[string]any{
+			"argv": []any{"sh", "-c", script, "sh", "{changed:**/*_test.go}"}, "revert": []any{"pkg/**"}, "parser": "gotest-json",
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	for script, want := range map[string]string{"go test -json ./pkg/": "", "echo broken >&2; exit 3": "UnparsedFailure"} {
+		c := parsed(script)
+		v, err := e.Evaluate(ctx, Request{Repo: repo.Dir, Commit: snaps["biting"], Base: base, Config: &c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g := v.Gates[0]; g.Reason != want || v.Passed != (want == "") || (want != "" && g.OutputTail != "broken") {
+			t.Errorf("%q: a failure must name failing tests to count: %+v", script, g)
+		}
+	}
 	if s := repo.Git("status", "--porcelain"); s != "" {
 		t.Fatalf("checkout touched: %s", s)
 	}

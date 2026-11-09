@@ -24,6 +24,10 @@ type BitesArgs struct {
 	Revert []string          `json:"revert"`
 	Dir    string            `json:"dir,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
+	// Parser and Report, as for cmd.run, make a failure count only when it
+	// names failing tests; a run that fails without them is inconclusive.
+	Parser string `json:"parser,omitempty"`
+	Report string `json:"report,omitempty"`
 }
 
 const bitesSchema = `{
@@ -34,7 +38,9 @@ const bitesSchema = `{
     "argv":   {"type": "array", "minItems": 1, "items": {"type": "string"}, "contains": {"type": "string", "pattern": "^\\{changed:.+\\}$"}},
     "revert": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "dir":    {"type": "string", "pattern": "^[^/]"},
-    "env":    {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "not": {"pattern": "^GIT_"}}, "additionalProperties": {"type": "string"}}
+    "env":    {"type": "object", "propertyNames": {"pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "not": {"pattern": "^GIT_"}}, "additionalProperties": {"type": "string"}},
+    "parser": {"enum": ["gotest-json", "pytest-junit", "regex"]},
+    "report": {"type": "string"}
   }
 }`
 
@@ -118,7 +124,7 @@ func (b *Bites) Run(ctx context.Context, inv tools.Invocation) (tools.Result, er
 	if err != nil {
 		return tools.Result{}, fmt.Errorf("test.bites: %w", err)
 	}
-	res, err := b.r.run(ctx, dir, Args{Argv: argv, Dir: a.Dir, Env: a.Env})
+	res, err := b.r.run(ctx, dir, Args{Argv: argv, Dir: a.Dir, Env: a.Env, Parser: a.Parser, Report: a.Report})
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -126,7 +132,12 @@ func (b *Bites) Run(ctx context.Context, inv tools.Invocation) (tools.Result, er
 		return res, nil
 	}
 	out := tools.Result{Duration: res.Duration, Artifacts: res.Artifacts, Metrics: metrics}
+	failing := slices.ContainsFunc(res.Diagnostics, func(d tools.Diagnostic) bool { return d.Severity == tools.Error })
+	if res.ExitCode != 0 && (a.Parser == "" || failing) {
+		return out, nil
+	}
 	if res.ExitCode != 0 {
+		out.ExitCode, out.Unparsed, out.OutputTail = res.ExitCode, true, res.OutputTail
 		return out, nil
 	}
 	sort.Strings(tests)

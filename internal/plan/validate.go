@@ -284,10 +284,10 @@ func Validate(p api.Plan, env Env) []Issue {
 				}
 			}
 		}
-		before := queuedReach(p, env.Queued)
+		deps := depGraph(p, env.Queued)
 		for _, t := range p.Tasks {
 			for _, q := range env.Queued {
-				if q.ID == t.ID || before[t.ID][q.ID] {
+				if q.ID == t.ID || reaches(deps, t.ID, q.ID) || reaches(deps, q.ID, t.ID) {
 					continue
 				}
 				what := fmt.Sprintf("task %q (%s)", q.ID, q.State)
@@ -563,17 +563,49 @@ func clash(m *modmap.Map, a, b []string) (string, bool) {
 	if g, h, ok := overlap(a, b); ok {
 		return fmt.Sprintf(" and both may change %s (%s / %s): add an `after` link or narrow the scopes", g, g, h), true
 	}
+	a, b = sources(a), sources(b)
 	if m == nil || len(a) == 0 || len(b) == 0 {
 		return "", false
 	}
 	ma, mb := touched(m, a), touched(m, b)
-	if mod := sharedModule(ma, mb); mod != "" {
+	if mod := sharedModule(ma, mb); mod != "" && (wild(a) || wild(b)) {
 		return fmt.Sprintf(" and both change module %s: expect merge conflicts; add an `after` link or merge the tasks", mod), true
 	}
 	if p, ok := coChanged(m, ma, mb); ok {
 		return fmt.Sprintf(", but %s and %s changed together in %d commits: they likely need coordinated edits (add an `after` link)", p.A, p.B, p.Commits), true
 	}
 	return "", false
+}
+
+// depGraph is every `after` link among the plan's tasks and queued work.
+func depGraph(p api.Plan, queued []Queued) map[string][]string {
+	deps := map[string][]string{}
+	for _, q := range queued {
+		deps[q.ID] = q.After
+	}
+	for _, t := range p.Tasks {
+		deps[strings.TrimSpace(t.ID)] = t.After
+	}
+	return deps
+}
+
+// reaches reports whether from runs after to, directly or through others.
+func reaches(deps map[string][]string, from, to string) bool {
+	seen := map[string]bool{}
+	stack := append([]string{}, deps[from]...)
+	for len(stack) > 0 {
+		d := strings.TrimSpace(stack[len(stack)-1])
+		stack = stack[:len(stack)-1]
+		if d == to {
+			return true
+		}
+		if seen[d] {
+			continue
+		}
+		seen[d] = true
+		stack = append(stack, deps[d]...)
+	}
+	return false
 }
 
 // queuedReach maps each plan task to the queued tasks it runs after,
@@ -602,6 +634,29 @@ func queuedReach(p api.Plan, queued []Queued) map[string]map[string]bool {
 		out[strings.TrimSpace(t.ID)] = seen
 	}
 	return out
+}
+
+// sources drops test paths: tasks that add different test files to a
+// module rarely conflict, and co-change history is about its code.
+func sources(scope []string) []string {
+	var out []string
+	for _, g := range scope {
+		if !modmap.IsTest(strings.TrimSpace(g)) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// wild reports whether a scope leaves its files open: named files that
+// differ cannot conflict, and the same file is a path overlap.
+func wild(scope []string) bool {
+	for _, g := range scope {
+		if strings.ContainsAny(g, "*?[") {
+			return true
+		}
+	}
+	return false
 }
 
 // overlap reports a pair of globs that can match a common path. An empty

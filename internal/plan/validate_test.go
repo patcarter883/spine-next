@@ -84,7 +84,7 @@ func TestValidateWithModules(t *testing.T) {
 	p := api.Plan{Tasks: []api.PlanTask{
 		{ID: "a", Intent: "change the handler signature everywhere", Scope: []string{"api/handler.go"}},
 		{ID: "b", Intent: "change the store interface for the handler", Scope: []string{"store/**"}},
-		{ID: "c", Intent: "another change to the same api package", Scope: []string{"api/routes.go", "api/*_test.go"}},
+		{ID: "c", Intent: "another change to the same api package", Scope: []string{"api/routes*.go", "api/*_test.go"}},
 		{ID: "d", Intent: "frontend work that is independent of the api", Scope: []string{"web/**"}},
 	}}
 	is := Validate(p, env)
@@ -211,5 +211,55 @@ func TestMissedTestsIgnoresTestOnlyScopes(t *testing.T) {
 		if got != tc.warn {
 			t.Errorf("%v: warned %v, want %v", tc.scope, got, tc.warn)
 		}
+	}
+}
+
+func TestModuleChecksIgnoreTestOnlyTasks(t *testing.T) {
+	m := &modmap.Map{Version: 1, Modules: []modmap.Module{
+		{Name: "collect/src", Language: "typescript"},
+		{Name: "libs/shared-composables/src", Language: "typescript"},
+	}, CoChange: []modmap.Pair{{A: "collect/src", B: "libs/shared-composables/src", Commits: 21, Strength: 0.6}}}
+	p := api.Plan{Tasks: []api.PlanTask{
+		{ID: "crop-sales-spec", Intent: "spec for useCropSales", Scope: []string{"collect/src/__tests__/useCropSales.test.ts"}},
+		{ID: "guard-spec", Intent: "spec for useContextGuard", Scope: []string{"collect/src/__tests__/useContextGuard.test.ts"}},
+		{ID: "toast-spec", Intent: "spec for useToast", Scope: []string{"libs/shared-composables/src/__tests__/useToast.test.ts"}},
+		{ID: "harness", Intent: "shared mount helper", Scope: []string{"collect/src/__tests__/mountUtils.ts"}},
+		{ID: "harness-too", Intent: "also edits the mount helper", Scope: []string{"collect/src/__tests__/mountUtils.ts"}},
+		{ID: "composable", Intent: "change useCropSales itself", Scope: []string{"collect/src/composables/useCropSales.ts"}},
+		{ID: "lib", Intent: "change a shared composable", Scope: []string{"libs/shared-composables/src/useToast.ts"}},
+		{ID: "other-composable", Intent: "change a different composable by name", Scope: []string{"collect/src/composables/useDraftConfirm.ts"}},
+		{ID: "broad", Intent: "rework every composable", Scope: []string{"collect/src/composables/**"}},
+	}}
+	is := Validate(p, Env{Modules: m})
+	for _, i := range is {
+		if strings.Contains(i.Message, "spec") && (strings.Contains(i.Message, "module") || strings.Contains(i.Message, "changed together")) {
+			t.Errorf("test-only tasks don't share modules: %s", i)
+		}
+	}
+	if has(is, Warning, `other-composable.scope: may run beside "composable" and both change module`) {
+		t.Errorf("two named files in one module cannot conflict: %v", is)
+	}
+	for _, want := range []string{`harness-too.scope: may run beside "harness" and both may change collect/src/__tests__/mountUtils.ts`,
+		`lib.scope: may run beside "composable", but collect/src and libs/shared-composables/src changed together in 21 commits`,
+		`broad.scope: may run beside "composable" and both may change collect/src/composables/useCropSales.ts`} {
+		if !has(is, Warning, want) {
+			t.Errorf("missing %q in\n%v", want, is)
+		}
+	}
+}
+
+func TestNoOverlapWarningOnceANewerPlanWaits(t *testing.T) {
+	p := api.Plan{Tasks: []api.PlanTask{{ID: "guard", Intent: "fail on unresolved vue components", Scope: []string{"*/src/__tests__/**"}}}}
+	queued := []Queued{
+		{ID: "harness", State: "proposed", Plan: "plan-new", Scope: []string{"meetings/src/__tests__/mountUtils.ts"}, After: []string{"guard"}},
+		{ID: "page-spec", State: "proposed", Plan: "plan-new", Scope: []string{"meetings/src/__tests__/MeetingsPage.test.ts"}, After: []string{"harness"}},
+		{ID: "unlinked", State: "proposed", Plan: "plan-new", Scope: []string{"admin/src/__tests__/Users.test.ts"}},
+	}
+	is := Validate(p, Env{Queued: queued})
+	if has(is, Warning, `"harness"`) || has(is, Warning, `"page-spec"`) {
+		t.Errorf("tasks that already wait for guard, directly or not, must not warn: %v", is)
+	}
+	if !has(is, Warning, `may run beside "unlinked"`) {
+		t.Errorf("an unlinked overlap must still warn: %v", is)
 	}
 }

@@ -327,7 +327,8 @@ function gateTable(g, r) {
   return `<table><tr><th>Gate</th><th>Tool</th><th>Result</th><th class="num">New</th><th class="num">Excused</th><th class="num">Fixed</th><th>Logs</th></tr>` +
     (g.gates || []).map(x => `<tr><td>${esc(x.gate)}</td><td class="mono">${esc(x.tool)}</td><td class="${x.skipped ? "skip" : x.exit_code === 0 ? "pass" : "fail"}">${x.skipped ? "skipped" : x.exit_code === 0 ? "pass" : "fail " + esc(x.reason || "")}${x.cached ? ' <span class="muted">(cached)</span>' : ""}</td>
      <td class="num">${(x.new || []).length}</td><td class="num">${x.excused || 0}</td><td class="num">${(x.fixed || []).length}</td><td>${artLinks(r, x.artifacts)}</td></tr>
-     ${(x.new || []).slice(0, 8).map(dg => `<tr><td></td><td colspan="6" class="diag"><span class="mono">${esc(dg.code)}</span> ${esc(dg.file || "")}${dg.line ? ":" + dg.line : ""} ${esc((dg.message || "").split("\n")[0]).slice(0, 200)}</td></tr>`).join("")}`).join("") + `</table>`;
+     ${(x.new || []).slice(0, 8).map(dg => `<tr><td></td><td colspan="6" class="diag"><span class="mono">${esc(dg.code)}</span> ${esc(dg.file || "")}${dg.line ? ":" + dg.line : ""} ${esc((dg.message || "").split("\n")[0]).slice(0, 200)}</td></tr>`).join("")}
+     ${x.output_tail ? `<tr><td></td><td colspan="6" class="diag"><details><summary class="hint">end of its output</summary><pre class="mono">${esc(x.output_tail)}</pre></details></td></tr>` : ""}`).join("") + `</table>`;
 }
 function artLinks(r, arts) {
   return (arts || []).map(a => `<a href="/api/repos/${enc(r)}/artifacts/${enc(a.digest)}" target="_blank" rel="noopener" title="${esc(a.digest)}">${esc(a.name)}</a> <span class="muted">${fmtBytes(a.size)}</span>`).join("<br>") || `<span class="muted">—</span>`;
@@ -850,6 +851,9 @@ async function viewQuality() {
     ${tile(q.avg_attempts.toFixed(1), "attempts per finished task")}${tile(q.finished, "finished tasks")}</div>
    <div class="grid2"><section class="card"><h3>Why tasks escalated</h3>${hbars(q.escalations)}</section><section class="card"><h3>Top failing gates</h3>${hbars(q.failing_gates)}</section>
    <section class="card"><h3>Why tasks failed</h3>${hbars(q.fail_reasons)}</section><section class="card"><h3>How agent runs ended</h3>${hbars(q.outcome_reasons)}</section></div>
+   <section class="card"><h3>Agents</h3><p class="hint">Change tasks by the agent that last ran them. First-round pass is of tasks finished in the window; escalations exclude approval holds.</p>
+   ${(q.agents || []).length ? `<table><tr><th>Agent</th><th class="num">Finished</th><th class="num">First-round pass</th><th class="num">Escalations</th><th class="num">Runs</th><th class="num">Tokens</th><th class="num">Cost</th></tr>
+    ${q.agents.map(x => `<tr><td class="mono">${esc(x.agent)}</td><td class="num">${x.finished}</td><td class="num">${x.finished ? Math.round(100 * x.first_round_pass / x.finished) + "%" : "—"} <span class="muted">(${x.first_round_pass}/${x.finished})</span></td><td class="num">${x.escalations}</td><td class="num">${x.runs}</td><td class="num">${x.tokens.toLocaleString()}</td><td class="num">${x.cost_usd ? "$" + x.cost_usd.toFixed(2) : "—"}</td></tr>`).join("")}</table>` : `<p class="muted">No agent runs in this window.</p>`}</section>
    <section class="card"><h3>Repository context: with vs without</h3><p class="hint">Tasks whose agents got the repository context (context.md, and the module map for planners) against tasks that did not — including ${q.context_control_tasks || 0} task(s) in the experiment's control arm (<code>context.experiment</code> in .spine/config.yaml). Make context a default only once these favour it with enough tasks on both sides.</p>
     <table><tr><th>Metric</th><th class="num">With context</th><th class="num">Without</th><th></th></tr>${(q.context || []).map(r => {
       const pct = /rate|hitting/.test(r.metric), f = v => pct ? Math.round(100 * v) + "%" : v.toFixed(2);

@@ -79,19 +79,31 @@ type stats struct {
 		Limits notify.Budgets `json:"limits"`
 	} `json:"cost"`
 	Quality struct {
-		Finished       int       `json:"finished"`
-		FirstRoundPass int       `json:"first_round_pass"`
-		FirstRoundRate float64   `json:"first_round_rate"`
-		AvgRounds      float64   `json:"avg_rounds"`
-		AvgAttempts    float64   `json:"avg_attempts"`
-		Escalations    []count   `json:"escalations"`
-		FailingGates   []count   `json:"failing_gates"`
-		FailReasons    []count   `json:"fail_reasons"`
-		Supervisors    []supStat `json:"supervisors"`
-		OutcomeReasons []count   `json:"outcome_reasons"`
-		Context        []ctxRow  `json:"context"`
-		ControlTasks   int       `json:"context_control_tasks"`
+		Finished       int         `json:"finished"`
+		FirstRoundPass int         `json:"first_round_pass"`
+		FirstRoundRate float64     `json:"first_round_rate"`
+		AvgRounds      float64     `json:"avg_rounds"`
+		AvgAttempts    float64     `json:"avg_attempts"`
+		Escalations    []count     `json:"escalations"`
+		FailingGates   []count     `json:"failing_gates"`
+		FailReasons    []count     `json:"fail_reasons"`
+		Supervisors    []supStat   `json:"supervisors"`
+		OutcomeReasons []count     `json:"outcome_reasons"`
+		Context        []ctxRow    `json:"context"`
+		ControlTasks   int         `json:"context_control_tasks"`
+		Agents         []agentStat `json:"agents"`
 	} `json:"quality"`
+}
+
+// agentStat compares the agents (adapter, and so model) that ran tasks.
+type agentStat struct {
+	Agent          string  `json:"agent"`
+	Finished       int     `json:"finished"`
+	FirstRoundPass int     `json:"first_round_pass"`
+	Escalations    int     `json:"escalations"`
+	Runs           int     `json:"runs"`
+	Tokens         int64   `json:"tokens"`
+	CostUSD        float64 `json:"cost_usd"`
 }
 
 // ctxRow compares one metric between tasks whose agents had repository
@@ -108,8 +120,12 @@ type ctxRow struct {
 
 type ctxTask struct {
 	seen, with, control, pi, firstKnown, firstPass, conflict bool
-	kind                                                     string
+	kind, adapter                                            string
 	rejected                                                 int
+	finished, firstRound                                     bool
+	escalations, runs                                        int
+	tokens                                                   int64
+	cost                                                     float64
 }
 
 func contextRows(ts map[string]*ctxTask) []ctxRow {
@@ -153,6 +169,40 @@ func contextRows(ts map[string]*ctxTask) []ctxRow {
 		}),
 		agg("tasks hitting merge conflicts", true, func(t *ctxTask) (float64, bool) { return b2f(t.conflict), t.kind == "" }),
 	}
+}
+
+func agentRows(ts map[string]*ctxTask) []agentStat {
+	by := map[string]*agentStat{}
+	for _, t := range ts {
+		if t.kind != "" || t.runs == 0 && !t.finished {
+			continue
+		}
+		name := t.adapter
+		if name == "" {
+			name = "default"
+		}
+		a := by[name]
+		if a == nil {
+			a = &agentStat{Agent: name}
+			by[name] = a
+		}
+		a.Runs += t.runs
+		a.Tokens += t.tokens
+		a.CostUSD += t.cost
+		a.Escalations += t.escalations
+		if t.finished {
+			a.Finished++
+			if t.firstRound {
+				a.FirstRoundPass++
+			}
+		}
+	}
+	out := []agentStat{}
+	for _, a := range by {
+		out = append(out, *a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Agent < out[j].Agent })
+	return out
 }
 
 type taskCost struct {
@@ -205,6 +255,7 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 	st := stats{Days: days, Since: since, Totals: map[string]int{}, Repos: []repoStat{}, Waits: map[string]float64{}}
 	st.Cost.TopTasks, st.Cost.Budget = []taskCost{}, []taskCost{}
 	st.Quality.Supervisors = []supStat{}
+	st.Quality.Agents = []agentStat{}
 	if cfg, ok := s.notifyCfg(); ok {
 		st.Cost.Limits = cfg.Budgets
 	}
@@ -283,7 +334,10 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 		}
 		evs, _ := repo.Store.ListEventsByKind(ctx, since, 0, "outcome", "transition", "decision", "verdict", "command", "agent_start", "plan_rejected")
 		for _, t := range tasks {
-			ctxTasks[repo.Name+"/"+string(t.ID)] = &ctxTask{kind: t.Spec.Kind}
+			ph := t.Status.Phase
+			ctxTasks[repo.Name+"/"+string(t.ID)] = &ctxTask{kind: t.Spec.Kind, adapter: t.Spec.Adapter,
+				finished:   t.Spec.Kind == "" && (ph == api.PhaseIntegrated || ph == api.PhaseFailed) && t.UpdatedAt.After(since),
+				firstRound: ph == api.PhaseIntegrated && t.Status.Attempt <= 1 && t.Status.PatchRound == 0}
 		}
 		ct := func(id api.TaskID) *ctxTask {
 			if c := ctxTasks[repo.Name+"/"+string(id)]; c != nil {
@@ -313,12 +367,16 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 			case "agent_start":
 				var d struct {
 					Attempt, Round int
+					Adapter        string `json:"adapter"`
 					Protocol       string `json:"protocol"`
 					Context        struct {
 						Notes, Modules, Control bool
 					} `json:"context"`
 				}
 				json.Unmarshal(e.Data, &d)
+				if d.Adapter != "" {
+					ct(e.TaskID).adapter = d.Adapter
+				}
 				if c := ct(e.TaskID); !c.seen {
 					c.seen, c.pi = true, d.Protocol == "pi-rpc"
 					c.with = d.Context.Notes || d.Context.Modules
@@ -339,6 +397,10 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 				rs.CostUSD += o.CostUSD
 				costBy[e.TaskID] += o.CostUSD
 				roundsBy[e.TaskID]++
+				c := ct(e.TaskID)
+				c.runs++
+				c.tokens += o.TokensUsed
+				c.cost += o.CostUSD
 				outcomes[string(o.Reason)]++
 				if e.At.Format("2006-01-02") == today {
 					st.Cost.Today.Tokens += o.TokensUsed
@@ -361,6 +423,9 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 					}
 				case api.PhaseEscalated:
 					escal[d.Reason]++
+					if d.Reason != "AwaitingApproval" {
+						ct(e.TaskID).escalations++
+					}
 					if d.Reason == "AwaitingApproval" {
 						escAt[e.TaskID] = e.At
 					}
@@ -510,6 +575,7 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 	st.Quality.Escalations, st.Quality.FailingGates = sorted(escal), sorted(failGates)
 	st.Quality.FailReasons, st.Quality.OutcomeReasons = sorted(failReasons), sorted(outcomes)
 	st.Quality.Context = contextRows(ctxTasks)
+	st.Quality.Agents = agentRows(ctxTasks)
 	for _, c := range ctxTasks {
 		if c.control {
 			st.Quality.ControlTasks++

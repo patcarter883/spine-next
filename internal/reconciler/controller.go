@@ -83,6 +83,7 @@ type Controller struct {
 	mu       sync.Mutex
 	inflight map[api.TaskID]*flight
 	slots    map[api.TaskID]bool
+	merges   mergeQueue
 	// staged holds approve/retry/cancel commands until the task's next
 	// reconcile applies them, so commands are serialized with reconciles by
 	// the per-key queue (a command never races a reconcile of its task).

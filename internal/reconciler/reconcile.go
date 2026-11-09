@@ -532,6 +532,22 @@ func commitMessage(t *api.Task) string {
 }
 
 func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, snap *api.SnapshotRef) (Result, error) {
+	first, ahead, err := c.mergeTurn(ctx, t)
+	if err != nil {
+		return Result{}, err
+	}
+	if !first {
+		msg := fmt.Sprintf("waiting to merge into %s: %d ahead", strings.TrimPrefix(t.Spec.BaseRef, "refs/heads/"), ahead)
+		if t.Status.Reason != "WaitingToMerge" || t.Status.Message != msg {
+			if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
+				s.Reason, s.Message = "WaitingToMerge", msg
+				return nil
+			}); err != nil {
+				return Result{}, err
+			}
+		}
+		return Result{RequeueAfter: 3 * time.Second}, nil
+	}
 	tip, err := c.WT.ResolveCommit(ctx, t.Spec.BaseRef)
 	if err != nil {
 		return Result{}, err
@@ -540,6 +556,7 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 	msg := commitMessage(t)
 	proposed, pre, err := c.WT.ProposedCommit(ctx, ws, tip, msg)
 	if errors.Is(err, worktree.ErrConflict) {
+		c.mergeDone(t)
 		return c.decide(ctx, t, b, snap, pre.Conflicts, false)
 	}
 	if err != nil {
@@ -578,6 +595,7 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 		}); err != nil {
 			return Result{}, err
 		}
+		c.mergeDone(t)
 		return c.escalate(ctx, t, "AwaitingApproval", msg)
 	}
 	res, err := c.WT.MergeAt(ctx, ws, t.Spec.BaseRef, tip, msg)
@@ -585,6 +603,7 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 	case errors.Is(err, worktree.ErrBaseMoved):
 		return Result{Requeue: true}, nil // someone landed first: re-preflight and re-gate
 	case errors.Is(err, worktree.ErrConflict):
+		c.mergeDone(t)
 		return c.decide(ctx, t, b, snap, res.Conflicts, false)
 	case errors.Is(err, worktree.ErrCheckoutDirty):
 		c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
@@ -607,6 +626,7 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 	}); err != nil {
 		return Result{}, err
 	}
+	c.mergeDone(t)
 	c.event(t.ID, "integrated", map[string]any{"commit": res.NewHead, "base_ref": t.Spec.BaseRef, "tree": res.ResultTree, "rescued": res.Rescued})
 	c.teardown(ctx, t.ID, t.Status.Attempt)
 	c.releaseSlot(t.ID)

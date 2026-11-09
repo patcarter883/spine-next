@@ -223,6 +223,19 @@ func TestParallelEight(t *testing.T) {
 	if r := got["t5"].Status; r.PatchRound != 1 {
 		t.Errorf("t5: crash should lead to a patch round, got r%d", r.PatchRound)
 	}
+	for i := 1; i <= 6; i++ {
+		id := api.TaskID(fmt.Sprintf("t%d", i))
+		evs, _ := a.Store.ListEvents(context.Background(), id, 0, 10000)
+		n := 0
+		for _, e := range evs {
+			if e.Kind == "verdict" && strings.Contains(string(e.Data), `"on_merge":true`) {
+				n++
+			}
+		}
+		if n > 1 {
+			t.Errorf("%s: %d merge checks; the merge queue should need at most one", id, n)
+		}
+	}
 	attempts := got["t7"].Status.Attempt + got["t8"].Status.Attempt
 	if attempts != 3 {
 		t.Errorf("t7/t8: want exactly one fresh attempt after the conflict, attempts %d+%d", got["t7"].Status.Attempt, got["t8"].Status.Attempt)

@@ -29,7 +29,7 @@ spine run --scope 'src/**' "Add input validation to the signup handler"
 2. It runs Claude Code over ACP inside that worktree.
 3. It snapshots the result and runs your gates.
 4. If a gate fails, it feeds the new failures back to the agent in a repair round. A run that crashes or stalls gets a repair round too, without the gates.
-5. Once the gates pass, it squash-merges into `main` with a compare-and-swap. If `main` has moved, the exact merge result is gated first.
+5. Once the gates pass, it squash-merges into `main` with a compare-and-swap. If `main` has moved, the exact merge result is gated first. Verified tasks merge into a branch one at a time, oldest first, so each merge result is checked once against the tip it lands on instead of being re-checked every time another task lands.
 
 If no controller is running, `spine run` starts one inline and exits when the task finishes: exit 0 means integrated. If one is running (`spine controller`), it submits the task and follows its progress.
 

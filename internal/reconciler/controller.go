@@ -86,6 +86,9 @@ type Controller struct {
 	mu       sync.Mutex
 	inflight map[api.TaskID]*flight
 	slots    map[api.TaskID]bool
+	// resuming holds tasks a person resumed that wait for a slot, with when
+	// they last asked; new tasks do not take a slot while one is waiting.
+	resuming map[api.TaskID]time.Time
 	merges   mergeQueue
 	// staged holds approve/retry/cancel commands until the task's next
 	// reconcile applies them, so commands are serialized with reconciles by
@@ -445,6 +448,41 @@ func (c *Controller) SetParallel(n int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.Config.Parallel = n
+}
+
+// acquireResumeSlot takes a slot for a task a person resumed, ahead of tasks
+// that have not started.
+func (c *Controller) acquireResumeSlot(id api.TaskID) bool {
+	if c.acquireSlot(id) {
+		c.mu.Lock()
+		delete(c.resuming, id)
+		c.mu.Unlock()
+		return true
+	}
+	c.mu.Lock()
+	if c.resuming == nil {
+		c.resuming = map[api.TaskID]time.Time{}
+	}
+	c.resuming[id] = time.Now()
+	c.mu.Unlock()
+	return false
+}
+
+// acquireNewSlot takes a slot for a task that has not started, unless a
+// resumed task is waiting for one. A resumed task asks every few seconds, so
+// one that stopped asking (cancelled, say) no longer holds new tasks back.
+func (c *Controller) acquireNewSlot(id api.TaskID) bool {
+	c.mu.Lock()
+	for rid, at := range c.resuming {
+		if time.Since(at) > 10*time.Second {
+			delete(c.resuming, rid)
+		} else if rid != id {
+			c.mu.Unlock()
+			return false
+		}
+	}
+	c.mu.Unlock()
+	return c.acquireSlot(id)
 }
 
 // SlotInfo reports the tasks holding one of this repository's worktree

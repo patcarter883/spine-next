@@ -52,7 +52,7 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 		return c.provision(ctx, &t, b)
 
 	case api.PhaseProvisioned:
-		if !c.acquireSlot(t.ID) { // resumed by a person after its slot was released
+		if !c.acquireResumeSlot(t.ID) { // resumed by a person after its slot was released
 			return Result{RequeueAfter: 2 * time.Second}, nil
 		}
 		return c.startAgent(ctx, &t, b, t.Status.PatchRound, t.Status.NextFeedback)
@@ -167,7 +167,7 @@ func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (
 		}
 		return Result{RequeueAfter: 3 * time.Second}, nil
 	}
-	if !c.acquireSlot(t.ID) {
+	if !c.acquireNewSlot(t.ID) {
 		return Result{RequeueAfter: 2 * time.Second}, nil
 	}
 	base, err := c.WT.ResolveCommit(ctx, t.Spec.BaseRef)

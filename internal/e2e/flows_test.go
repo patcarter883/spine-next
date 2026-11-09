@@ -216,3 +216,47 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// A task whose merge check passed in its current round, left Verifying by a
+// restart, goes back to the merge queue instead of re-running its branch
+// gates.
+func TestPassedMergeCheckSurvivesRestart(t *testing.T) {
+	plan := map[string]map[string]any{"m": {"*": map[string]any{"write": map[string]string{"pkg/m.go": goFile("M")}}}}
+	h := newHarness(t, plan, 2)
+	a := h.open(context.Background())
+	stop := runController(t, a)
+	s := spec("add M", "pkg/**")
+	s.Escalation.RequireApprovalBeforeMerge = true
+	inbox.Write(inbox.Dir(a.CommonDir), inbox.Command{Kind: inbox.Submit, Task: "m", Spec: &s})
+	waitPhase(t, a, "m", api.PhaseEscalated, "AwaitingApproval")
+	stop()
+	ctx := context.Background()
+	if _, err := a.Store.UpdateStatus(ctx, "m", 0, api.SourceGate, func(st *api.Status) error {
+		st.LastGate.OnMerge = true
+		st.Phase, st.Reason, st.Op = api.PhaseVerifying, "GateRunningOnMerge", nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Store.UpdateStatus(ctx, "m", 0, api.SourceHuman, func(st *api.Status) error {
+		st.SetCondition(api.CondApproved, true, "Approved", "test", api.SourceHuman)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evs, _ := a.Store.ListEvents(ctx, "m", 0, 0)
+	before := len(evs)
+	a.Close()
+
+	a2 := h.open(ctx)
+	defer a2.Close()
+	stop2 := runController(t, a2)
+	defer stop2()
+	waitPhase(t, a2, "m", api.PhaseIntegrated, "")
+	evs, _ = a2.Store.ListEvents(ctx, "m", 0, 0)
+	for _, e := range evs[before:] {
+		if e.Kind == "verdict" {
+			t.Fatalf("re-gated after restart: %s", e.Data)
+		}
+	}
+}

@@ -87,7 +87,10 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 			return c.startAgent(ctx, &t, b, t.Status.PatchRound, nil)
 		}
 		g := t.Status.LastGate
-		if g != nil && g.OnMerge && g.Attempt == t.Status.Attempt && g.Round == t.Status.PatchRound && !g.Passed {
+		if g != nil && g.OnMerge && g.Attempt == t.Status.Attempt && g.Round == t.Status.PatchRound {
+			if g.Passed {
+				return c.integrate(ctx, &t, b, snap)
+			}
 			return c.decide(ctx, &t, b, snap, nil, true)
 		}
 		if g == nil || g.OnMerge || g.Commit != snap.Commit {

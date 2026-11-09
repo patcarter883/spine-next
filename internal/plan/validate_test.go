@@ -193,3 +193,23 @@ func TestAutoLink(t *testing.T) {
 		t.Fatal("links made a cycle")
 	}
 }
+
+func TestMissedTestsIgnoresTestOnlyScopes(t *testing.T) {
+	m := &modmap.Map{Version: 1, Modules: []modmap.Module{
+		{Name: "collect/src", Language: "typescript", Tests: []string{"collect/src/__tests__/AssetRegisterPanel.test.ts"}, NTests: 40},
+	}}
+	for _, tc := range []struct {
+		scope []string
+		warn  bool
+	}{
+		{[]string{"collect/src/__tests__/mountUtils.ts", "collect/src/__tests__/RainfallCsvDialog.test.ts"}, false},
+		{[]string{"collect/src/__tests__/useCropSales.test.ts"}, false},
+		{[]string{"collect/src/composables/useCropSales.ts", "collect/src/__tests__/useCropSales.test.ts"}, false},
+		{[]string{"collect/src/composables/useCropSales.ts"}, true},
+	} {
+		got := len(missedTests(m, tc.scope)) > 0
+		if got != tc.warn {
+			t.Errorf("%v: warned %v, want %v", tc.scope, got, tc.warn)
+		}
+	}
+}

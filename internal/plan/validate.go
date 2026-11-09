@@ -358,11 +358,24 @@ func missedTests(m *modmap.Map, scope []string) []*modmap.Module {
 	if len(scope) == 0 {
 		return nil
 	}
+	tested := map[string]bool{}
+	for _, h := range scope {
+		h = strings.TrimSpace(h)
+		if modmap.IsTest(h) {
+			for _, mod := range m.Touched(h) {
+				tested[mod.Name] = true
+			}
+		}
+	}
 	var out []*modmap.Module
 	seen := map[string]bool{}
 	for _, g := range scope {
-		for _, mod := range m.Touched(strings.TrimSpace(g)) {
-			if seen[mod.Name] || len(mod.Tests) == 0 {
+		g = strings.TrimSpace(g)
+		if modmap.IsTest(g) {
+			continue
+		}
+		for _, mod := range m.Touched(g) {
+			if seen[mod.Name] || len(mod.Tests) == 0 || tested[mod.Name] {
 				continue
 			}
 			seen[mod.Name] = true

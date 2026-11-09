@@ -650,7 +650,7 @@ function planEditor(el, readonly) {
      <label>After (ids)<textarea data-k="after" ${ro} style="min-height:50px">${esc((t.after || []).join("\n"))}</textarea></label>
      <label>Agent / gates<select data-k="agent" ${ro}>${agentOptions(t.agent, null)}</select><input data-k="gates" value="${esc((t.gates || []).join(", "))}" placeholder="all gates" ${ro}></label></div>
      ${readonly ? "" : `<div class="sugg" data-sg-i="${i}"></div>`}<div class="issues"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
-   ${readonly ? `<p class="hint">${!can("operator") ? "Read-only." : "This plan was already handled."}</p>` : `<div class="actions"><button class="btn" id="padd">+ Add task</button><button class="btn" id="plink" title="Add after links between tasks that can change the same paths, including running tasks and tasks older plans propose">Link overlapping tasks</button><button class="btn" id="pexport">Export JSON</button>
+   ${readonly ? `<p class="hint">${!can("operator") ? "Read-only." : "This plan was already handled."}</p>` : `<div class="actions"><button class="btn" id="padd">+ Add task</button>${p.plan_task ? `<button class="btn" id="psave" title="Keep these edits on the plan, so they are there when you come back">Save changes</button>` : ""}<button class="btn" id="plink" title="Add after links between tasks that can change the same paths, including running tasks and tasks older plans propose">Link overlapping tasks</button><button class="btn" id="pexport">Export JSON</button>
      <label class="check hint"><input type="checkbox" id="pappr"> hold every task for my approval</label><button class="btn primary" id="psubmit">Submit ${p.tasks.length} task(s)</button>
      ${p.plan_task ? `<button class="btn" id="preplan">Ask the planner again…</button>` : ""}</div>`}`;
   const sync = () => {
@@ -681,12 +681,19 @@ function planEditor(el, readonly) {
   });
   $$("[data-del]", el).forEach(b => b.onclick = () => { sync(); p.tasks.splice(+b.dataset.del, 1); planEditor(el) });
   const add = $("#padd", el); if (add) add.onclick = () => { sync(); p.tasks.push(blankTask()); planEditor(el) };
+  const save = async () => {
+    const j = await send("POST", `/api/repos/${enc(p.repo)}/plans/save`, { plan: { tasks: p.tasks.map(clean), notes: p.notes }, plan_task: p.plan_task });
+    return j.controller ? "saved" : "saved; it applies when this repository's controller runs";
+  };
+  const sv = $("#psave", el); if (sv) sv.onclick = async () => { sync(); try { toast(`Plan ${await save()}`, "ok") } catch (e) { toast(esc(e.message), "bad") } };
   const lk = $("#plink", el); if (lk) lk.onclick = async () => {
     sync();
     try {
       const j = await send("POST", `/api/repos/${enc(p.repo)}/plans/link`, { plan: { tasks: p.tasks.map(clean), notes: p.notes }, plan_task: p.plan_task || "", base: p.base || "" });
       j.plan.tasks.forEach((t, i) => { p.tasks[i].after = t.after || [] });
-      toast(j.links.length ? `Added ${j.links.length} link(s):<br>${j.links.map(l => `${esc(l.task)} after ${esc(l.after)}`).join("<br>")}` : "No overlapping tasks to link", "ok");
+      let msg = j.links.length ? `Added ${j.links.length} link(s):<br>${j.links.map(l => `${esc(l.task)} after ${esc(l.after)}`).join("<br>")}` : "No overlapping tasks to link";
+      if (j.links.length && p.plan_task) msg += `<br>Plan ${await save()}.`;
+      toast(msg, "ok");
       planEditor(el);
     } catch (e) { toast(esc(e.message), "bad") }
   };

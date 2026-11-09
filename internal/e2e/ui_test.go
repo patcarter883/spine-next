@@ -421,6 +421,22 @@ func TestDashboardPlanner(t *testing.T) {
 	if c := d.do("POST", "/api/repos/app/plans/submit", map[string]any{"plan": p, "plan_task": pr.ID}, &map[string]any{}); c != 422 {
 		t.Fatalf("invalid plan submitted: %d", c)
 	}
+	// Edits saved during review survive leaving the page.
+	saved := p
+	saved.Notes = "edited during review"
+	if c := d.do("POST", "/api/repos/app/plans/save", map[string]any{"plan": saved, "plan_task": pr.ID}, &map[string]any{}); c != 200 {
+		t.Fatalf("save %d", c)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		x, _ := a.Store.GetTask(context.Background(), api.TaskID(pr.ID))
+		if x.Status.Plan != nil && x.Status.Plan.Notes == "edited during review" && x.Status.Phase == api.PhaseEscalated {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("saved plan not stored: %+v", x.Status.Plan)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	p.Tasks[1].After = []string{"fa"}
 	p.Tasks[1].Title = "Add B (edited)"
 	var sub struct{ Submitted []string }

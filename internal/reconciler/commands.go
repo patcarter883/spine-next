@@ -144,6 +144,20 @@ func (c *Controller) applyMore(ctx context.Context, t *api.Task, cmd inbox.Comma
 			st.NextFeedback = fb
 		})
 
+	case inbox.PlanUpdate:
+		if t.Spec.Kind != api.KindPlan || ph != api.PhaseEscalated || cmd.Plan == nil {
+			return perm("%s is not a plan waiting for review", t.ID)
+		}
+		p := *cmd.Plan
+		_, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceHuman, func(s *api.Status) error {
+			s.Plan = &p
+			return nil
+		})
+		if err == nil {
+			c.event(t.ID, "plan_edited", map[string]any{"tasks": len(p.Tasks), "by": cmd.By})
+		}
+		return err
+
 	case inbox.PlanAccept:
 		if t.Spec.Kind != api.KindPlan || ph != api.PhaseEscalated {
 			return perm("%s is not a plan waiting for review", t.ID)

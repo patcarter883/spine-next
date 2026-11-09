@@ -38,6 +38,9 @@ const (
 	Rollback Kind = "rollback"
 	// PlanAccept closes a planner task once its tasks were submitted.
 	PlanAccept Kind = "plan_accept"
+	// PlanUpdate replaces the plan a planner task holds for review with a
+	// person's edits.
+	PlanUpdate Kind = "plan_update"
 	// GC removes old snapshot refs, stray worktrees and old tool-cache
 	// entries (repository-wide; Task is empty).
 	GC Kind = "gc"
@@ -49,6 +52,7 @@ type Command struct {
 	Kind Kind       `json:"kind"`
 	Task api.TaskID `json:"task"`
 	Spec *api.Spec  `json:"spec,omitempty"` // Submit
+	Plan *api.Plan  `json:"plan,omitempty"` // PlanUpdate
 	At   time.Time  `json:"at"`
 	By   string     `json:"by,omitempty"`
 	Text string     `json:"text,omitempty"` // Hint; Retry (optional hint); PlanAccept (summary)

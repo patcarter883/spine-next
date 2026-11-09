@@ -289,6 +289,35 @@ func (s *Server) validatePlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"issues": is, "ok": !plan.HasErrors(is), "order": topo(req.Plan)})
 }
 
+// savePlan stores a person's edits to a plan awaiting review, so they
+// survive leaving the page.
+func (s *Server) savePlan(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.repo(r)
+	if !ok {
+		httpError(w, http.StatusNotFound, "unknown repository")
+		return
+	}
+	var req planBody
+	if !decode(w, r, &req) {
+		return
+	}
+	pt, err := repo.Store.GetTask(r.Context(), api.TaskID(req.PlanTask))
+	if err != nil || pt.Spec.Kind != api.KindPlan || pt.Status.Phase != api.PhaseEscalated {
+		httpError(w, http.StatusConflict, "the planner task is not waiting for review")
+		return
+	}
+	if len(req.Plan.Tasks) > plan.MaxTasks {
+		httpError(w, http.StatusUnprocessableEntity, fmt.Sprintf("the plan has %d tasks; the limit is %d", len(req.Plan.Tasks), plan.MaxTasks))
+		return
+	}
+	note(r, repo.Name, req.PlanTask, "edit plan")
+	if _, err := inbox.Write(repo.InboxDir, inbox.Command{Kind: inbox.PlanUpdate, Task: pt.ID, Plan: &req.Plan, By: by(r)}); err != nil {
+		httpError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"saved": true, "controller": repo.State == "running"})
+}
+
 // linkPlan adds `after` links between tasks that can change the same paths,
 // as the controller does for a planner's plan.
 func (s *Server) linkPlan(w http.ResponseWriter, r *http.Request) {

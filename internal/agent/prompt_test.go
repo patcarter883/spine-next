@@ -47,3 +47,19 @@ func TestPlanPromptListsQueuedWork(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptsAskForOutcomesAndCheckedClaims(t *testing.T) {
+	planner := Prompt{Task: "p", Attempt: 1, Plan: true, Intent: "goal"}.Render()
+	for _, want := range []string{"Write each intent as the outcome to reach", "verify every fact you state", "`\"tests_only\": true`", "\"tests_only\": false"} {
+		if !strings.Contains(planner, want) {
+			t.Errorf("planner prompt lacks %q", want)
+		}
+	}
+	work := Prompt{Task: "w", Attempt: 1, Intent: "add tests"}.Render()
+	if !strings.Contains(work, "trust the code") || strings.Contains(work, TestsOnlyConstraint) {
+		t.Errorf("work prompt:\n%s", work)
+	}
+	if tests := (Prompt{Task: "w", Attempt: 1, Intent: "add tests", TestsOnly: true}).Render(); !strings.Contains(tests, TestsOnlyConstraint) {
+		t.Errorf("tests-only prompt lacks its constraint:\n%s", tests)
+	}
+}

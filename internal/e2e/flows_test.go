@@ -311,3 +311,29 @@ func TestMergeStageGateRunsOnlyOnTheMergeResult(t *testing.T) {
 		t.Fatalf("want 2 round verdicts and 2 merge checks, have %d and %d", rounds, merges)
 	}
 }
+
+// A tests-only task that changes only tests integrates; one that also
+// changes code waits for approval, naming the files, and lands once approved.
+func TestTestsOnlyTaskHoldsCodeChangesForApproval(t *testing.T) {
+	plan := map[string]map[string]any{
+		"tests": {"*": map[string]any{"write": map[string]string{"pkg/base_test.go": goTest("Base", 1)}}},
+		"fixes": {"*": map[string]any{"write": map[string]string{"pkg/f.go": goFile("F"), "pkg/f_test.go": goTest("F", 2)}}},
+	}
+	h := newHarness(t, plan, 2)
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	for _, id := range []api.TaskID{"tests", "fixes"} {
+		s := spec("test "+string(id), "pkg/**")
+		s.TestsOnly = true
+		inbox.Write(inbox.Dir(a.CommonDir), inbox.Command{Kind: inbox.Submit, Task: id, Spec: &s})
+	}
+	waitPhase(t, a, "tests", api.PhaseIntegrated, "")
+	held := waitPhase(t, a, "fixes", api.PhaseEscalated, "AwaitingApproval")
+	if !strings.Contains(held.Status.Message, "tests-only task changed code outside its tests (pkg/f.go)") {
+		t.Fatalf("message: %q", held.Status.Message)
+	}
+	command(t, a, inbox.Approve, "fixes")
+	waitPhase(t, a, "fixes", api.PhaseIntegrated, "")
+}

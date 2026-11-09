@@ -417,7 +417,7 @@ func (s *Server) submitPlan(w http.ResponseWriter, r *http.Request) {
 	for _, id := range topo(req.Plan) {
 		t := byID[id]
 		in := config.TaskInput{Title: t.Title, Intent: t.Intent, Base: req.Base, Scope: t.Scope, After: t.After, Agent: t.Agent,
-			RequireApproval: t.RequireApproval, MaxAttempts: t.MaxAttempts, MaxRounds: t.MaxRounds, MaxTokens: t.MaxTokens,
+			RequireApproval: t.RequireApproval, TestsOnly: t.TestsOnly, MaxAttempts: t.MaxAttempts, MaxRounds: t.MaxRounds, MaxTokens: t.MaxTokens,
 			Gates: t.Gates, Template: t.Template}
 		spec, err := s.buildSpec(ctx, repo, in, by(r))
 		if err != nil {

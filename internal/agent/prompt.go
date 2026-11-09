@@ -33,6 +33,8 @@ type Prompt struct {
 	// (planners only).
 	Notes   string
 	Modules string
+	// TestsOnly marks a task that adds or improves tests.
+	TestsOnly bool
 	// Survey asks for repository context: labels and caveats in the
 	// module map Spine derived, and a capped context.md.
 	Survey      bool
@@ -50,8 +52,13 @@ var DefaultConstraints = []string{
 	"Work only inside the current directory; it is an isolated git worktree created for this task.",
 	"Do not run git commit, git push, git checkout, git reset or git stash; Spine snapshots and integrates your changes.",
 	"Do not change .spine/ configuration.",
+	"If the code contradicts what the task says about it, trust the code: do not change existing behaviour only to match the task's wording. Make the change the task needs, and describe the mismatch in your final message.",
+	"Before you stop, run the tests that cover what you changed; a change to a shared test helper, fixture or base class is covered by the whole suite.",
 	"When the task is complete, stop. Your changes are checked by deterministic gates, not by your own report.",
 }
+
+// TestsOnlyConstraint applies to tasks that add or improve tests.
+const TestsOnlyConstraint = "This task adds or improves tests. Change test files only. If a test shows the code misbehaving, do not change the code to make it pass: leave the code alone, and describe the problem in your final message. Any change outside test files is held for a person's review."
 
 // Render produces the prompt text.
 func (p Prompt) Render() string {
@@ -120,6 +127,9 @@ func (p Prompt) Render() string {
 		}
 	}
 	cs := append(append([]string{}, DefaultConstraints...), p.Constraints...)
+	if p.TestsOnly {
+		cs = append(cs, TestsOnlyConstraint)
+	}
 	b.WriteString("\n# Constraints\n\n")
 	for _, c := range cs {
 		fmt.Fprintf(&b, "- %s\n", c)
@@ -186,8 +196,10 @@ func (p Prompt) renderPlan() string {
 	b.WriteString("\n\n# What to do\n\n")
 	b.WriteString("Do not implement the goal. Read the repository and break the goal into small, independently verifiable tasks that coding agents will carry out one each, in isolated worktrees. ")
 	b.WriteString("Each task must be reviewable on its own and leave the repository building and its tests passing. Prefer tasks that touch disjoint files so they can run in parallel; when one task needs another's change, list it in `after`.\n\n")
+	b.WriteString("Write each intent as the outcome to reach and how to observe it (the response, value or state a test asserts), not as an implementation you have not checked: a test that says \"the row is gone\" makes an agent hard-delete a model that soft-deletes. Read the code an intent describes first, and verify every fact you state in it (that a suite passes, a route exists, a helper is unused) by reading the code or running a command; mark anything you could not verify as unverified. ")
+	b.WriteString("Set `\"tests_only\": true` on a task that only adds or improves tests: a change it makes outside test files is held for a person's review.\n\n")
 	fmt.Fprintf(&b, "Write the plan as JSON to `%s` in the current directory, and change nothing else:\n\n", PlanFile)
-	b.WriteString("```json\n{\n  \"notes\": \"optional: assumptions, risks, what you left out\",\n  \"tasks\": [\n    {\n      \"id\": \"short-kebab-id\",\n      \"title\": \"commit subject, under 72 characters\",\n      \"intent\": \"precise instructions for the coding agent: what to change, where, and how to test it\",\n      \"scope\": [\"path/globs/**\", \"the task may change\"],\n      \"after\": [\"ids of tasks that must land first\"]\n    }\n  ]\n}\n```\n\n")
+	b.WriteString("```json\n{\n  \"notes\": \"optional: assumptions, risks, what you left out\",\n  \"tasks\": [\n    {\n      \"id\": \"short-kebab-id\",\n      \"title\": \"commit subject, under 72 characters\",\n      \"intent\": \"precise instructions for the coding agent: what to change, where, and how to test it\",\n      \"scope\": [\"path/globs/**\", \"the task may change\"],\n      \"after\": [\"ids of tasks that must land first\"],\n      \"tests_only\": false\n    }\n  ]\n}\n```\n\n")
 	if p.Notes != "" {
 		b.WriteString("# Repository notes\n\n" + p.Notes + "\n\n")
 	}

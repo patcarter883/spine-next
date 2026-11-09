@@ -313,6 +313,7 @@ type TaskInput struct {
 	After           []string      `json:"after"` // "task" or "repo:task"
 	Agent           string        `json:"agent"` // adapter name
 	RequireApproval bool          `json:"require_approval"`
+	TestsOnly       bool          `json:"tests_only"`
 	MaxAttempts     int           `json:"max_attempts"`
 	MaxRounds       int           `json:"max_rounds"`
 	MaxTokens       int64         `json:"max_tokens"`
@@ -379,6 +380,7 @@ func (c Config) NewSpec(in TaskInput) (api.Spec, error) {
 	spec.Template = strings.TrimSpace(in.Template)
 	spec.CreatedBy = in.CreatedBy
 	spec.Escalation.RequireApprovalBeforeMerge = in.RequireApproval
+	spec.TestsOnly = in.TestsOnly
 	return spec, api.ValidateSpec(spec)
 }
 

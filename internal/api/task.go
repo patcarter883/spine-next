@@ -31,6 +31,9 @@ type Spec struct {
 	CreatedBy string `json:"created_by,omitempty"`
 	// Template names the preset the task was created from, if any.
 	Template string `json:"template,omitempty"`
+	// TestsOnly marks a task that adds or improves tests. A change of
+	// anything but test files is held for a person's approval.
+	TestsOnly bool `json:"tests_only,omitempty"`
 }
 
 // KindPlan marks a planner task.
@@ -296,6 +299,7 @@ type PlanTask struct {
 	Gates           []string `json:"gates,omitempty"`
 	Template        string   `json:"template,omitempty"`
 	RequireApproval bool     `json:"require_approval,omitempty"`
+	TestsOnly       bool     `json:"tests_only,omitempty"`
 	MaxAttempts     int      `json:"max_attempts,omitempty"`
 	MaxRounds       int      `json:"max_rounds,omitempty"`
 	MaxTokens       int64    `json:"max_tokens,omitempty"`

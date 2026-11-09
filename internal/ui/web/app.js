@@ -525,6 +525,7 @@ async function taskForm(el, opts) {
    <fieldset style="border:1px solid var(--line);border-radius:8px"><legend class="hint">Gates — what “done” means (<span id="gbase"></span>)</legend><div class="gatechecks" id="gchecks"><span class="muted">loading…</span></div>
     <p class="hint">Leave all checked to use the base's <code>.spine/gates.yaml</code> as it evolves; uncheck to pin a subset for this task.</p></fieldset>
    <label class="check"><input type="checkbox" name="require_approval" ${sp.escalation?.require_approval_before_merge ? "checked" : ""}> Hold for my approval before integrating</label>
+   <label class="check"><input type="checkbox" name="tests_only" ${sp.tests_only ? "checked" : ""}> Tests only <span class="hint">(a change outside test files is held for my approval)</span></label>
    <div class="err" id="tfErr"></div><div class="actions"><button class="btn primary" type="submit">${t ? (t.status.phase === "Pending" ? "Save" : "Save and retry") : "Create task"}</button>
    ${!t ? `<button type="button" class="btn" id="saveTpl">Save as template…</button>` : ""}<button type="button" class="btn" id="tfCancel">Cancel</button></div></form>`;
   const f = $("#tf", el); let gatesAll = [], templates = [];
@@ -565,7 +566,7 @@ async function taskForm(el, opts) {
   const body = () => {
     const checked = $$("#gchecks input", el).filter(c => c.checked).map(c => c.value);
     return { intent: f.intent.value, title: f.title.value, scope: lines(f.scope.value), after: lines(f.after.value), base: f.base.value, agent: f.agent.value,
-      require_approval: f.require_approval.checked, max_attempts: num(f.max_attempts.value), max_rounds: num(f.max_rounds.value), max_tokens: num(f.max_tokens.value),
+      require_approval: f.require_approval.checked, tests_only: f.tests_only.checked, max_attempts: num(f.max_attempts.value), max_rounds: num(f.max_rounds.value), max_tokens: num(f.max_tokens.value),
       gates: checked.length === gatesAll.length ? [] : checked, template: f.template && templates[+f.template.value]?.name || "" };
   };
   $("#tfCancel", el).onclick = () => opts.onCancel();
@@ -649,6 +650,7 @@ function planEditor(el, readonly) {
      <div class="row2"><label>Scope (one glob per line)<textarea data-k="scope" ${ro} style="min-height:50px">${esc((t.scope || []).join("\n"))}</textarea></label>
      <label>After (ids)<textarea data-k="after" ${ro} style="min-height:50px">${esc((t.after || []).join("\n"))}</textarea></label>
      <label>Agent / gates<select data-k="agent" ${ro}>${agentOptions(t.agent, null)}</select><input data-k="gates" value="${esc((t.gates || []).join(", "))}" placeholder="all gates" ${ro}></label></div>
+     <label class="check hint"><input type="checkbox" data-k="tests_only" ${t.tests_only ? "checked" : ""} ${readonly ? "disabled" : ""}> tests only: hold for my approval if it changes anything but tests</label>
      ${readonly ? "" : `<div class="sugg" data-sg-i="${i}"></div>`}<div class="issues"></div>${readonly ? "" : `<div><button class="btn small danger" data-del="${i}">Remove</button></div>`}</div>`).join("")}</div>
    ${readonly ? `<p class="hint">${!can("operator") ? "Read-only." : "This plan was already handled."}</p>` : `<div class="actions"><button class="btn" id="padd">+ Add task</button>${p.plan_task ? `<button class="btn" id="psave" title="Keep these edits on the plan, so they are there when you come back">Save changes</button>` : ""}<button class="btn" id="plink" title="Add after links between tasks that can change the same paths, including running tasks and tasks older plans propose">Link overlapping tasks</button><button class="btn" id="pexport">Export JSON</button>
      <label class="check hint"><input type="checkbox" id="pappr"> hold every task for my approval</label><button class="btn primary" id="psubmit">Submit ${p.tasks.length} task(s)</button>
@@ -656,7 +658,7 @@ function planEditor(el, readonly) {
   const sync = () => {
     $$(".ptask", el).forEach(div => {
       const t = p.tasks[+div.dataset.i];
-      $$("[data-k]", div).forEach(inp => { const k = inp.dataset.k, v = inp.value; t[k] = ["scope", "after"].includes(k) ? lines(v) : k === "gates" ? lines(v) : v.trim() === "" && k !== "intent" ? "" : v });
+      $$("[data-k]", div).forEach(inp => { const k = inp.dataset.k, v = inp.value; if (inp.type === "checkbox") { t[k] = inp.checked; return } t[k] = ["scope", "after"].includes(k) ? lines(v) : k === "gates" ? lines(v) : v.trim() === "" && k !== "intent" ? "" : v });
     });
   };
   const validate = async () => {
@@ -716,7 +718,7 @@ const agentOptions = (cur, d) => {
   if (cur && !as.some(a => a.name === cur)) opts.push(`<option value="${esc(cur)}" selected>${esc(cur)}${d ? " — not configured" : ""}</option>`);
   return opts.join("");
 };
-const clean = t => { const o = { id: (t.id || "").trim(), intent: t.intent || "" }; for (const k of ["title", "agent", "template"]) if (t[k]) o[k] = t[k]; for (const k of ["scope", "after", "gates"]) if ((t[k] || []).length) o[k] = t[k]; for (const k of ["max_attempts", "max_rounds", "max_tokens", "require_approval"]) if (t[k]) o[k] = t[k]; return o };
+const clean = t => { const o = { id: (t.id || "").trim(), intent: t.intent || "" }; for (const k of ["title", "agent", "template"]) if (t[k]) o[k] = t[k]; for (const k of ["scope", "after", "gates"]) if ((t[k] || []).length) o[k] = t[k]; for (const k of ["max_attempts", "max_rounds", "max_tokens", "require_approval", "tests_only"]) if (t[k]) o[k] = t[k]; return o };
 function drawPlanGraph(el, tasks) {
   const nodes = tasks.map(t => ({ key: t.id, label: t.id || "(no id)", deps: (t.after || []).filter(d => tasks.some(x => x.id === d)), state: "ready" }));
   el.innerHTML = nodes.length ? `<div class="graphwrap">${dagSVG(nodes, {})}</div>` : "";

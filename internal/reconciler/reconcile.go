@@ -12,7 +12,9 @@ import (
 	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/gate"
+	"github.com/patcarter883/spine-next/internal/gitro"
 	"github.com/patcarter883/spine-next/internal/inbox"
+	"github.com/patcarter883/spine-next/internal/modmap"
 	"github.com/patcarter883/spine-next/internal/plan"
 	"github.com/patcarter883/spine-next/internal/storage"
 	"github.com/patcarter883/spine-next/internal/worktree"
@@ -312,7 +314,7 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 		}
 	}
 	prompt := agent.Prompt{Task: t.ID, Attempt: attempt, Round: round, Intent: t.Spec.Intent, Scope: t.Spec.Scope,
-		Acceptance: acceptance, Feedback: fb}
+		Acceptance: acceptance, Feedback: fb, TestsOnly: t.Spec.TestsOnly}
 	if t.Spec.Kind == api.KindPlan {
 		prompt.Plan, prompt.Scope, prompt.Agents, prompt.Gates = true, nil, c.Config.AdapterNames(), acceptance
 		prompt.Acceptance = nil
@@ -504,6 +506,30 @@ func (c *Controller) startGate(ctx context.Context, t *api.Task, snap *api.Snaps
 	return Result{}, nil
 }
 
+// nonTestChanges lists the files commit changes since its merge base with
+// tip that are not tests, at most ten.
+func (c *Controller) nonTestChanges(ctx context.Context, commit, tip string) ([]string, error) {
+	r := gitro.Repo{Dir: c.WT.Primary()}
+	mb, err := r.MergeBase(ctx, commit, tip)
+	if err != nil {
+		return nil, err
+	}
+	cs, err := r.DiffTrees(ctx, mb, commit)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, ch := range cs {
+		if !modmap.IsTest(ch.Path) {
+			out = append(out, ch.Path)
+		}
+	}
+	if len(out) > 10 {
+		out = append(out[:10], fmt.Sprintf("and %d more", len(out)-10))
+	}
+	return out, nil
+}
+
 // failedAtMergeStage reports whether g failed on a gate that runs only on
 // the merge result: the change, not the new base, is what it judged.
 func failedAtMergeStage(g *api.GateSummary) bool {
@@ -619,8 +645,17 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 	// round or attempt changes the snapshot and asks again. Approval is
 	// additive: it never excuses a gate.
 	approved := t.Status.IsTrue(api.CondApproved) && (t.Status.ApprovedTree == "" || t.Status.ApprovedTree == snap.Tree)
-	if t.Spec.Escalation.RequireApprovalBeforeMerge && !approved {
+	var outside []string
+	if t.Spec.TestsOnly && !approved {
+		if outside, err = c.nonTestChanges(ctx, snap.Commit, tip); err != nil {
+			return Result{}, err
+		}
+	}
+	if (t.Spec.Escalation.RequireApprovalBeforeMerge || len(outside) > 0) && !approved {
 		msg := "verified on the merge result; review the diff and run `spine approve " + string(t.ID) + "` to integrate"
+		if len(outside) > 0 {
+			msg = "a tests-only task changed code outside its tests (" + strings.Join(outside, ", ") + "); check that change is intended, then run `spine approve " + string(t.ID) + "`"
+		}
 		if t.Status.IsTrue(api.CondApproved) {
 			msg = "the change differs from the one you approved (a later round or attempt); review it again"
 		}

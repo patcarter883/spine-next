@@ -1103,7 +1103,7 @@ async function settingsAgents(rn) {
 }
 function savedToast(j) {
   if (j.restart_error) toast("Saved, but the controller did not restart: " + esc(j.restart_error), "bad");
-  else toast(j.changed ? (j.restarted ? "Saved; controller restarted" : "Saved") : "No changes", "ok");
+  else toast(j.changed ? (j.applied ? "Saved; applied without restarting the controller" : j.restarted ? "Saved; controller restarted" : "Saved") : "No changes", "ok");
   if (j.uncommitted) toast("<code>.spine/config.yaml</code> has uncommitted changes: tasks can't integrate into a checked-out base branch until you commit it.", "warn");
 }
 

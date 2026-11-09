@@ -153,6 +153,25 @@ func (s *Supervisor) Restart(name string) error {
 }
 
 // RepoSlots reports a running controller's slot holders.
+// SetParallel changes a running repository's parallelism without
+// restarting its controller.
+func (s *Supervisor) SetParallel(name string, n int) error {
+	s.mu.Lock()
+	r := s.repos[name]
+	s.mu.Unlock()
+	if r == nil {
+		return fmt.Errorf("supervisor: no repository %q", name)
+	}
+	r.mu.Lock()
+	a := r.app
+	r.mu.Unlock()
+	if a == nil {
+		return fmt.Errorf("supervisor: %s is not running", name)
+	}
+	a.Controller.SetParallel(n)
+	return nil
+}
+
 func (s *Supervisor) RepoSlots(name string) ([]api.TaskID, int, bool) {
 	s.mu.Lock()
 	r := s.repos[name]

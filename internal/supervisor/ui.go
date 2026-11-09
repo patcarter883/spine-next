@@ -98,6 +98,9 @@ func (u *UISource) RemoveRepo(name string) error {
 // RestartRepo implements ui.Admin.
 func (u *UISource) RestartRepo(name string) error { return u.Sup.Restart(name) }
 
+// SetParallel implements ui.Admin.
+func (u *UISource) SetParallel(name string, n int) error { return u.Sup.SetParallel(name, n) }
+
 // RepoSlots implements ui.Admin.
 func (u *UISource) RepoSlots(name string) ([]api.TaskID, int, bool) { return u.Sup.RepoSlots(name) }
 

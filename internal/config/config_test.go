@@ -234,3 +234,19 @@ parallel: 2
 		t.Error("removed the default agent")
 	}
 }
+
+func TestParallelOnly(t *testing.T) {
+	cur := []byte("agent: claude\nparallel: 2\nbudget:\n  max_wall_clock: 45m\n")
+	if n, ok := ParallelOnly(cur, []byte("agent: claude\nparallel: 5\nbudget:\n  max_wall_clock: 45m0s\n  max_tokens: 0\n")); !ok || n != 5 {
+		t.Fatalf("a parallel change, written differently but otherwise equal: %d %v", n, ok)
+	}
+	if _, ok := ParallelOnly(cur, []byte("agent: claude\nparallel: 5\nbudget:\n  max_wall_clock: 1h\n")); ok {
+		t.Fatal("another change needs a restart")
+	}
+	if _, ok := ParallelOnly(cur, cur); ok {
+		t.Fatal("no change is not a parallel change")
+	}
+	if _, ok := ParallelOnly(cur, []byte("parallel: [")); ok {
+		t.Fatal("an invalid file is not a parallel change")
+	}
+}

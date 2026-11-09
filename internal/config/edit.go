@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -333,4 +334,20 @@ func child(node *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+// ParallelOnly reports whether next differs from cur only in parallel, and
+// its new value: a running controller can take that without a restart.
+func ParallelOnly(cur, next []byte) (int, bool) {
+	a, err := Parse(cur)
+	if err != nil {
+		return 0, false
+	}
+	b, err := Parse(next)
+	if err != nil || a.Parallel == b.Parallel {
+		return 0, false
+	}
+	n := b.Parallel
+	b.Parallel = a.Parallel
+	return n, reflect.DeepEqual(a, b)
 }

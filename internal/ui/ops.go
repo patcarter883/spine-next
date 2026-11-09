@@ -212,7 +212,9 @@ func (s *Server) writeConfig(w http.ResponseWriter, r *http.Request, repo Repo, 
 		out["uncommitted"] = true
 	}
 	if s.Admin != nil {
-		if err := s.Admin.RestartRepo(repo.Name); err != nil {
+		if n, ok := config.ParallelOnly(cur, next); ok && s.Admin.SetParallel(repo.Name, n) == nil {
+			out["applied"] = true
+		} else if err := s.Admin.RestartRepo(repo.Name); err != nil {
 			out["restart_error"] = err.Error()
 		} else {
 			out["restarted"] = true

@@ -69,6 +69,7 @@ type Admin interface {
 	AddRepo(ctx context.Context, path, name string) error
 	RemoveRepo(name string) error
 	RestartRepo(name string) error
+	SetParallel(name string, n int) error
 	Slots() Slots
 	SetLimits(maxAgents, maxGates int) error
 	// RepoSlots reports a running controller's slot holders.

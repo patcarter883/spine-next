@@ -430,6 +430,14 @@ func (c *Controller) acquireSlot(id api.TaskID) bool {
 	return true
 }
 
+// SetParallel changes how many tasks may hold a worktree at once. Tasks
+// already holding one keep it.
+func (c *Controller) SetParallel(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Config.Parallel = n
+}
+
 // SlotInfo reports the tasks holding one of this repository's worktree
 // slots and the configured parallelism.
 func (c *Controller) SlotInfo() (held []api.TaskID, parallel int) {

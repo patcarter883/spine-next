@@ -53,7 +53,7 @@ func (s *Server) gatesCheck(w http.ResponseWriter, r *http.Request) {
 		gc, src = gate.DefaultConfig(ast.Available()), "built-in defaults"
 	}
 	note(r, repo.Name, "", "gates check "+rev)
-	rep, err := app.GateEngine(repo.CommonDir).Check(ctx, repo.Path, rev, gc, src)
+	rep, err := app.GateEngine(repo.CommonDir).Check(ctx, repo.Path, rev, gc, src, "")
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return

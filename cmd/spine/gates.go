@@ -25,12 +25,13 @@ import (
 // gates with no agent: the onboarding prerequisite.
 func runGates(ctx context.Context, args []string) error {
 	if len(args) == 0 || args[0] != "check" {
-		return errors.New("gates check [REV] [--file .spine/gates.yaml] [--json]")
+		return errors.New("gates check [REV] [--file .spine/gates.yaml] [--worktree DIR] [--json]")
 	}
 	fs := flag.NewFlagSet("gates check", flag.ContinueOnError)
 	repo := fs.String("repo", ".", "repository")
 	file := fs.String("file", "", "check this gates file instead of the base's (e.g. a draft before committing it)")
 	asJSON := fs.Bool("json", false, "print JSON")
+	wt := fs.String("worktree", "", "a provisioned checkout to link the gates file's baseline.link entries from (vendor, .env), as a task's worktree is")
 	pos, err := parseInterspersed(fs, args[1:])
 	if err != nil {
 		return err
@@ -55,7 +56,7 @@ func runGates(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	rep, err := app.GateEngine(cd).Check(ctx, primary, rev, gc, source)
+	rep, err := app.GateEngine(cd).Check(ctx, primary, rev, gc, source, *wt)
 	if err != nil {
 		return err
 	}

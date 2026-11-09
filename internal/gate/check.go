@@ -33,6 +33,7 @@ type GateCheck struct {
 	Diagnostics []api.Diagnostic  `json:"diagnostics,omitempty"` // first few
 	Duration    time.Duration     `json:"duration_ns"`
 	Artifacts   []api.ArtifactRef `json:"artifacts,omitempty"`
+	OutputTail  string            `json:"output_tail,omitempty"`
 }
 
 // CheckReport is `spine gates check`.
@@ -48,8 +49,10 @@ type CheckReport struct {
 // Check dry-runs every gate of cfg on rev with no agent and no change: the
 // onboarding test that the gates can run here at all, and which of them a
 // task can actually pass. Unlike Evaluate it runs every gate (no early
-// stop) and reports raw tool results.
-func (e *Engine) Check(ctx context.Context, repo, rev string, cfg Config, source string) (CheckReport, error) {
+// stop) and reports raw tool results. worktree, when set, is a provisioned
+// checkout that cfg.Baseline.Link directories are linked from, as a task's
+// lease is.
+func (e *Engine) Check(ctx context.Context, repo, rev string, cfg Config, source, worktree string) (CheckReport, error) {
 	start := time.Now()
 	r := gitro.Repo{Dir: repo}
 	commit, err := r.Line(ctx, "rev-parse", "--verify", "-q", rev+"^{commit}")
@@ -61,7 +64,7 @@ func (e *Engine) Check(ctx context.Context, repo, rev string, cfg Config, source
 		return CheckReport{}, err
 	}
 	rep := CheckReport{Rev: rev, Commit: commit, Source: source, OK: true}
-	mats := &materializer{repo: repo, scratch: e.ScratchDir}
+	mats := &materializer{repo: repo, scratch: e.ScratchDir, worktree: worktree, link: cfg.Baseline.Link}
 	defer mats.cleanup()
 	for _, name := range cfg.Order {
 		g := cfg.Gates[name]
@@ -87,7 +90,7 @@ func (e *Engine) Check(ctx context.Context, repo, rev string, cfg Config, source
 				gc.Level, gc.Message = CheckFail, "could not run: "+err.Error()
 				break
 			}
-			gc.ExitCode, gc.Duration, gc.Artifacts = res.ExitCode, res.Duration, res.Artifacts
+			gc.ExitCode, gc.Duration, gc.Artifacts, gc.OutputTail = res.ExitCode, res.Duration, res.Artifacts, res.OutputTail
 			errs := errorsOf(res.Diagnostics)
 			gc.Errors = len(errs)
 			if len(errs) > 5 {
@@ -134,6 +137,15 @@ func (r CheckReport) String() string {
 			}
 			msg, _, _ := strings.Cut(d.Message, "\n")
 			fmt.Fprintf(&b, "            %s %s %s\n", d.Code, loc, msg)
+		}
+		if g.Level == CheckFail && g.OutputTail != "" {
+			lines := strings.Split(g.OutputTail, "\n")
+			if len(lines) > 15 {
+				lines = lines[len(lines)-15:]
+			}
+			for _, l := range lines {
+				fmt.Fprintf(&b, "            | %s\n", l)
+			}
 		}
 	}
 	return b.String()

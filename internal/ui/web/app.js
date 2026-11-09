@@ -662,7 +662,7 @@ function planEditor(el, readonly) {
   const validate = async () => {
     sync();
     try {
-      const j = await send("POST", `/api/repos/${enc(p.repo)}/plans/validate`, { plan: { tasks: p.tasks.map(clean), notes: p.notes }, base: p.base || "" });
+      const j = await send("POST", `/api/repos/${enc(p.repo)}/plans/validate`, { plan: { tasks: p.tasks.map(clean), notes: p.notes }, plan_task: p.plan_task || "", base: p.base || "" });
       const global = j.issues.filter(x => !x.task || !p.tasks.some((t, i) => (t.id || `#${i + 1}`) === x.task));
       $("#pissues", el).innerHTML = (j.ok ? `<div class="pass">✓ spec.validate: no errors${j.issues.length ? `, ${j.issues.length} warning(s)` : ""}</div>` : `<div class="fail">✗ spec.validate found errors</div>`) + global.map(issue).join("");
       $$(".ptask", el).forEach(div => { const id = p.tasks[+div.dataset.i]?.id || `#${+div.dataset.i + 1}`; $(".issues", div).innerHTML = j.issues.filter(x => x.task === id).map(issue).join("") });

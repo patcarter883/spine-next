@@ -280,3 +280,39 @@ func TestAgentsEditing(t *testing.T) {
 		t.Fatalf("after delete %+v %v", c.Adapters, err)
 	}
 }
+
+func TestPlanReviewIgnoresItsOwnProposal(t *testing.T) {
+	ctx := context.Background()
+	a := newRepo(t)
+	a.w.CreateTask(ctx, "plan-a", api.Spec{Kind: api.KindPlan, Intent: "goal", BaseRef: "refs/heads/main"})
+	a.w.UpdateStatus(ctx, "plan-a", 0, api.SourceController, func(s *api.Status) error {
+		s.Phase, s.Reason = api.PhaseEscalated, "PlanReady"
+		s.Plan = &api.Plan{Tasks: []api.PlanTask{{ID: "mine", Intent: "write the first test", Scope: []string{"tests/a.php"}}}}
+		return nil
+	})
+	src := SourceFunc(func(context.Context) []Repo {
+		return []Repo{{Name: "alpha", Path: t.TempDir(), State: "running", Store: a.ro, InboxDir: a.inbox}}
+	})
+	srv := httptest.NewServer((&Server{Source: src}).Handler())
+	defer srv.Close()
+	validate := func(body string) string {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/repos/alpha/plans/validate", strings.NewReader(body))
+		req.Header.Set("X-Spine", "1")
+		req.Header.Set("Content-Type", "application/json")
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		b, _ := json.Marshal(m["issues"])
+		return string(b)
+	}
+	p := `{"tasks":[{"id":"mine","intent":"write the first test","scope":["tests/a.php"]}]}`
+	if is := validate(`{"plan":` + p + `,"plan_task":"plan-a"}`); strings.Contains(is, "also proposes") || strings.Contains(is, "beside") {
+		t.Fatalf("a plan is compared with its own proposal: %s", is)
+	}
+	if is := validate(`{"plan":` + p + `}`); !strings.Contains(is, "also proposes") {
+		t.Fatalf("another plan proposing the same id must still warn: %s", is)
+	}
+}

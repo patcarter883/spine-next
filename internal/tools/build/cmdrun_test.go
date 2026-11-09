@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/patcarter883/spine-next/internal/artifacts"
+	"github.com/patcarter883/spine-next/internal/testrepo"
 	"github.com/patcarter883/spine-next/internal/tools"
 )
 
@@ -77,5 +78,47 @@ func TestCmdRunEnvAndMissingBinary(t *testing.T) {
 	args, _ = json.Marshal(map[string]any{"argv": []string{"true"}, "env": map[string]string{"GIT_DIR": "/x"}})
 	if _, err := reg.Invoke(ctx, "cmd.run", tools.Invocation{Tree: "x", Dir: dir, Args: args}); err == nil {
 		t.Fatal("GIT_* env must be rejected by the schema")
+	}
+}
+
+func TestCmdRunChangedFiles(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	repo.Write(map[string]string{"keep.php": "<?php 1;", "gone.php": "<?php 1;", "notes.md": "a", "sub/x.php": "<?php 1;"})
+	base := repo.Commit("base")
+	repo.Write(map[string]string{"keep.php": "<?php 2;", "new.php": "<?php 1;", "notes.md": "b", "sub/x.php": "<?php 2;"})
+	repo.Git("rm", "-q", "gone.php")
+	change := repo.Commit("change")
+	repo.Write(map[string]string{"notes.md": "c"})
+	docsOnly := repo.Commit("docs only")
+
+	r := &Runner{}
+	reg := tools.New(tools.Options{Cache: tools.NewMemCache()})
+	reg.MustRegister(r.Tools()...)
+	out := filepath.Join(t.TempDir(), "args")
+	run := func(commit, base string, argv ...string) tools.Result {
+		args, _ := json.Marshal(Args{Argv: append([]string{"sh", "-c", `printf '%s\n' "$@" > ` + out, "sh"}, argv...)})
+		os.Remove(out)
+		res, err := reg.Invoke(ctx, "cmd.run", tools.Invocation{Repo: repo.Dir, Dir: repo.Dir, Tree: repo.Tree(commit), Commit: commit, Base: base, Args: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	read := func() string { b, _ := os.ReadFile(out); return string(b) }
+
+	run(change, base, "--test", "{changed:**/*.php}")
+	if got := read(); got != "--test\nkeep.php\nnew.php\nsub/x.php\n" {
+		t.Fatalf("php files the change adds or modifies, never deleted ones: %q", got)
+	}
+	run(change, base, "{changed}")
+	if got := read(); got != "keep.php\nnew.php\nnotes.md\nsub/x.php\n" {
+		t.Fatalf("every added or modified file: %q", got)
+	}
+	if res := run(docsOnly, change, "{changed:**/*.php}"); res.ExitCode != 0 || res.Metrics["changed_files"] != 0 || read() != "" {
+		t.Fatalf("no matching files: skipped and passing, %+v %q", res, read())
+	}
+	if res := run(change, docsOnly, "--test", "{changed:**/*.php}"); res.Cached {
+		t.Fatal("the same tree measured against another base must not reuse the result")
 	}
 }

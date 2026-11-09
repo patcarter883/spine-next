@@ -16,6 +16,8 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/artifacts"
 	"github.com/patcarter883/spine-next/internal/exec"
 	"github.com/patcarter883/spine-next/internal/tools"
+	"github.com/patcarter883/spine-next/internal/tools/diff"
 )
 
 // Runner holds the execution environment shared by cmd.run and the go.*
@@ -56,6 +59,9 @@ func (r *Runner) Tools() []tools.Tool {
 
 // Args are cmd.run's arguments.
 type Args struct {
+	// Argv is the command. An element "{changed}" (or "{changed:GLOB}")
+	// expands to the change's added and modified files; with none, the run is
+	// skipped and passes.
 	Argv   []string          `json:"argv"`
 	Parser string            `json:"parser,omitempty"`
 	Dir    string            `json:"dir,omitempty"` // relative to the tree root
@@ -97,7 +103,14 @@ func (c *CmdRun) EnvKey(ctx context.Context, inv tools.Invocation) (string, erro
 	if err := json.Unmarshal(inv.Args, &a); err != nil {
 		return "", err
 	}
-	return c.r.envKey(a.Argv[0])
+	k, err := c.r.envKey(a.Argv[0])
+	if err != nil || !usesChanged(a.Argv) {
+		return k, err
+	}
+	if inv.BaseKey != "" {
+		return k + "\x00changed:" + inv.BaseKey, nil
+	}
+	return k + "\x00changed:" + inv.Base + "\x00" + inv.Commit, nil
 }
 
 func (c *CmdRun) Run(ctx context.Context, inv tools.Invocation) (tools.Result, error) {
@@ -105,7 +118,56 @@ func (c *CmdRun) Run(ctx context.Context, inv tools.Invocation) (tools.Result, e
 	if err := json.Unmarshal(inv.Args, &a); err != nil {
 		return tools.Result{}, err
 	}
+	if usesChanged(a.Argv) {
+		argv, n, err := expandChanged(ctx, inv, a)
+		if err != nil {
+			return tools.Result{}, fmt.Errorf("cmd.run: {changed}: %w", err)
+		}
+		if n == 0 {
+			return tools.Result{Metrics: map[string]float64{"changed_files": 0}}, nil
+		}
+		a.Argv = argv
+	}
 	return c.r.run(ctx, inv.Dir, a)
+}
+
+// changedRe is an argv element standing for the change's added and modified
+// files, optionally only those matching a glob: "{changed}", "{changed:**/*.php}".
+var changedRe = regexp.MustCompile(`^\{changed(?::(.+))?\}$`)
+
+func usesChanged(argv []string) bool {
+	return slices.ContainsFunc(argv, changedRe.MatchString)
+}
+
+// expandChanged replaces each {changed} element with the files the change
+// adds or modifies (relative to the run's dir), and reports how many there
+// were. A run with none has nothing to check.
+func expandChanged(ctx context.Context, inv tools.Invocation, a Args) ([]string, int, error) {
+	cs, _, err := diff.Changes(ctx, inv)
+	if err != nil {
+		return nil, 0, err
+	}
+	prefix := ""
+	if a.Dir != "" {
+		prefix = strings.TrimSuffix(filepath.ToSlash(a.Dir), "/") + "/"
+	}
+	var out []string
+	n := 0
+	for _, s := range a.Argv {
+		m := changedRe.FindStringSubmatch(s)
+		if m == nil {
+			out = append(out, s)
+			continue
+		}
+		for _, c := range cs {
+			if c.Status == 'D' || !strings.HasPrefix(c.Path, prefix) || (m[1] != "" && !diff.MatchGlob(m[1], c.Path)) {
+				continue
+			}
+			out = append(out, strings.TrimPrefix(c.Path, prefix))
+			n++
+		}
+	}
+	return out, n, nil
 }
 
 // envKey identifies the binary that will run and the environment values that

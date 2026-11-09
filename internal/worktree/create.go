@@ -235,3 +235,44 @@ func truncate(b []byte, n int) string {
 	}
 	return string(b)
 }
+
+// Reopen lets a task use an attempt again whose lease was released before the
+// task recorded it: a provision cut short by a shutdown. It refuses if
+// anything of that attempt survives (checkout, branch or any snapshot of the
+// task), so it can never hand out a worktree an attempt worked in.
+func (m *Manager) Reopen(ctx context.Context, task string, attempt int) error {
+	if err := validateTask(task, attempt); err != nil {
+		return err
+	}
+	path := m.LeasePath(task, attempt)
+	lk, err := m.lockPath(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer lk.release()
+	l, err := m.cfg.Store.GetLease(ctx, task, attempt)
+	if err != nil {
+		return err
+	}
+	if l.State != storage.LeaseReleased {
+		return fmt.Errorf("worktree: %s attempt %d is %s, not released", task, attempt, l.State)
+	}
+	if _, err := os.Stat(l.Path); err == nil {
+		return fmt.Errorf("worktree: %s attempt %d still has a checkout at %s", task, attempt, l.Path)
+	}
+	if registered, err := m.isRegistered(ctx, l.Path); err != nil || registered {
+		return errors.Join(fmt.Errorf("worktree: %s attempt %d is still registered", task, attempt), err)
+	}
+	if _, ok, err := m.revParse(ctx, m.primary, "refs/heads/"+l.Branch); err != nil || ok {
+		return errors.Join(fmt.Errorf("worktree: %s attempt %d still has branch %s", task, attempt, l.Branch), err)
+	}
+	refs, err := m.git1(ctx, m.primary, "for-each-ref", "--count=1", "--format=%(refname)", SnapshotRefPrefix+task+"/")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(refs) != "" {
+		return fmt.Errorf("worktree: %s has snapshots (%s)", task, strings.TrimSpace(refs))
+	}
+	l.State, l.BaseOID, l.AttemptID = storage.LeaseRequested, "", ""
+	return m.cfg.Store.PutLease(ctx, l)
+}

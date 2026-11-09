@@ -176,6 +176,14 @@ func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (
 	}
 	attempt := t.Status.Attempt + 1
 	lease, err := c.WT.Create(ctx, string(t.ID), attempt, base)
+	if errors.Is(err, worktree.ErrLeaseReleased) && t.Status.Attempt < attempt && t.Status.Worktree == nil {
+		// A shutdown cut the last provision short after the lease was made
+		// and released, before this task recorded the attempt.
+		if rerr := c.WT.Reopen(ctx, string(t.ID), attempt); rerr != nil {
+			return Result{}, errors.Join(err, rerr)
+		}
+		lease, err = c.WT.Create(ctx, string(t.ID), attempt, base)
+	}
 	if errors.Is(err, worktree.ErrProvisionHook) {
 		return c.finish(ctx, t, api.PhaseFailed, "ProvisionFailed", err.Error())
 	}

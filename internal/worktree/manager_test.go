@@ -455,3 +455,33 @@ func TestRecoverSparesOperatorDaemons(t *testing.T) {
 		t.Fatalf("operator process %d is dead: %v %s", pid, err, stat)
 	}
 }
+
+func TestReopenAnAttemptReleasedBeforeItWasUsed(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	l, err := f.m.Create(ctx, "t1", 1, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.Teardown(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.m.Create(ctx, "t1", 1, "main"); !errors.Is(err, ErrLeaseReleased) {
+		t.Fatalf("a released attempt is not handed out again: %v", err)
+	}
+	if err := f.m.Reopen(ctx, "t1", 1); err != nil {
+		t.Fatal(err)
+	}
+	l, err = f.m.Create(ctx, "t1", 1, "main")
+	if err != nil || l.State != storage.LeaseReady {
+		t.Fatalf("reopened attempt: %+v %v", l, err)
+	}
+
+	write(t, filepath.Join(l.Path, "work.txt"), "done\n")
+	if err := f.m.Teardown(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.Reopen(ctx, "t1", 1); err == nil {
+		t.Fatal("an attempt that left a snapshot must not be reopened")
+	}
+}

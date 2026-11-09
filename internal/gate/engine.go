@@ -149,6 +149,7 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 			cur, err := e.Reg.Invoke(ctx, g.Tool, tools.Invocation{
 				Repo: req.Repo, Tree: tree, Commit: req.Commit, Base: req.Base, Args: args, Timeout: g.Timeout,
 				BaseKey: mbTree + " " + baseTree, Materialize: mats.for_(tree), Recheck: recheck,
+				MaterializeTree: func(ctx context.Context, t string) (string, error) { return mats.for_(t)(ctx) },
 			})
 			if err != nil {
 				return api.GateVerdict{}, false, fmt.Errorf("gate %s: %w", name, err)

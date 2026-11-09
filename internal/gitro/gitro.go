@@ -6,7 +6,8 @@
 // (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null, discovery variables
 // scrubbed), GIT_OPTIONAL_LOCKS=0, and the same hook/gc suppression as
 // internal/worktree. Materialize is the one helper that writes files, and it
-// writes only into a caller-owned directory through a temporary index.
+// writes only into a caller-owned directory through a temporary index;
+// EditTree adds tree objects, never refs.
 package gitro
 
 import (
@@ -264,6 +265,54 @@ func (r Repo) Show(ctx context.Context, rev, path string) ([]byte, bool, error) 
 	}
 	out, err := r.Run(ctx, "cat-file", "blob", strings.TrimSpace(string(oid)))
 	return out, err == nil, err
+}
+
+// TreeEdit sets one path in a tree to a blob, or removes it when OID is "".
+type TreeEdit struct {
+	Path, Mode, OID string
+}
+
+// EditTree writes the tree that is tree with edits applied and returns its
+// OID. It adds tree objects to the object store and touches no ref or index.
+func (r Repo) EditTree(ctx context.Context, tree string, edits []TreeEdit) (string, error) {
+	idx, err := os.CreateTemp("", "spine-edit-*.idx")
+	if err != nil {
+		return "", err
+	}
+	idxPath := idx.Name()
+	idx.Close()
+	os.Remove(idxPath)
+	defer os.Remove(idxPath)
+	env := []string{"GIT_INDEX_FILE=" + idxPath}
+	var info bytes.Buffer
+	for _, e := range edits {
+		if e.OID == "" {
+			fmt.Fprintf(&info, "0 %s\t%s\n", strings.Repeat("0", 40), e.Path)
+		} else {
+			fmt.Fprintf(&info, "%s %s\t%s\n", e.Mode, e.OID, e.Path)
+		}
+	}
+	for _, step := range []struct {
+		stdin []byte
+		args  []string
+	}{
+		{nil, []string{"read-tree", tree}},
+		{info.Bytes(), []string{"update-index", "--index-info"}},
+	} {
+		if _, code, stderr, err := r.RunRC(ctx, env, step.stdin, step.args...); err != nil {
+			return "", err
+		} else if code != 0 {
+			return "", &Error{Args: step.args, ExitCode: code, Stderr: stderr}
+		}
+	}
+	out, code, stderr, err := r.RunRC(ctx, env, nil, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", &Error{Args: []string{"write-tree"}, ExitCode: code, Stderr: stderr}
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Materialize writes the files of tree into dir, which must be empty or

@@ -52,9 +52,9 @@ var DefaultPassEnv = []string{
 	"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "SSL_CERT_FILE",
 }
 
-// Tools returns cmd.run, go.build, go.vet and go.test sharing r.
+// Tools returns cmd.run, test.bites, go.build, go.vet and go.test sharing r.
 func (r *Runner) Tools() []tools.Tool {
-	return []tools.Tool{&CmdRun{r: r}, goTool(r, "go.build"), goTool(r, "go.vet"), goTool(r, "go.test")}
+	return []tools.Tool{&CmdRun{r: r}, &Bites{r: r}, goTool(r, "go.build"), goTool(r, "go.vet"), goTool(r, "go.test")}
 }
 
 // Args are cmd.run's arguments.

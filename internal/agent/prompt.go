@@ -267,6 +267,7 @@ func DescribeGate(g api.GateRef) string {
 		"go.build":        "`go build ./...` succeeds",
 		"go.vet":          "`go vet ./...` is clean",
 		"go.test":         "`go test ./...` introduces no new failures",
+		"test.bites":      "the tests you add or change fail when your change to the code they cover is reverted (they must check what the change does)",
 	}[g.Tool]
 	if desc == "" && g.Tool == "cmd.run" {
 		if argv, ok := g.Args["argv"].([]any); ok {

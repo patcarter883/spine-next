@@ -77,7 +77,10 @@ type Invocation struct {
 	// If empty, Materialize is called to obtain one, only on a cache miss.
 	Dir         string
 	Materialize func(ctx context.Context) (string, error)
-	Args        json.RawMessage
+	// MaterializeTree checks out any tree for the evaluation, with the same
+	// dependency links, for tools that judge a variant of Tree.
+	MaterializeTree func(ctx context.Context, tree string) (string, error)
+	Args            json.RawMessage
 	// Timeout overrides Spec.Timeout when positive.
 	Timeout time.Duration
 	// Recheck runs a Hermetic tool again instead of returning a cached

@@ -438,7 +438,7 @@ func (c *Controller) startGate(ctx context.Context, t *api.Task, snap *api.Snaps
 	}
 	id := t.ID
 	scope := t.Spec.Scope
-	c.start(id, "gate", func(opCtx context.Context) {
+	c.startOp(id, "gate", onMerge, func(opCtx context.Context) {
 		v, err := c.Gate.Evaluate(opCtx, gate.Request{Repo: c.WT.Primary(), Commit: commit, Base: base,
 			Worktree: lease.Path, Scope: scope, Config: &cfg})
 		wctx := context.WithoutCancel(opCtx)

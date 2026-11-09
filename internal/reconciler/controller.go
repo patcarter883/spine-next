@@ -56,6 +56,9 @@ type Waiter struct {
 	Task  api.TaskID `json:"task"`
 	Kind  string     `json:"kind"`
 	Since time.Time  `json:"since"`
+	// Urgent waiters are served before others of the same kind: the merge
+	// check that every other verified task is queued behind.
+	Urgent bool `json:"urgent,omitempty"`
 }
 
 type waiterKey struct{}
@@ -363,6 +366,11 @@ func (c *Controller) isInflight(id api.TaskID) bool {
 
 // start runs fn as the task's single in-flight operation.
 func (c *Controller) start(id api.TaskID, kind string, fn func(ctx context.Context)) {
+	c.startOp(id, kind, false, fn)
+}
+
+// startOp is start, with urgent operations served first for global slots.
+func (c *Controller) startOp(id api.TaskID, kind string, urgent bool, fn func(ctx context.Context)) {
 	ctx, cancel := context.WithCancel(c.context())
 	f := &flight{kind: kind, cancel: cancel, done: make(chan struct{})}
 	c.mu.Lock()
@@ -381,7 +389,7 @@ func (c *Controller) start(id api.TaskID, kind string, fn func(ctx context.Conte
 			c.q.Add(id)
 		}()
 		if c.Limits != nil {
-			release, err := c.acquireGlobal(WithWaiter(ctx, Waiter{Repo: c.Repo, Task: id, Kind: kind}), id, kind)
+			release, err := c.acquireGlobal(WithWaiter(ctx, Waiter{Repo: c.Repo, Task: id, Kind: kind, Urgent: urgent}), id, kind)
 			if err != nil {
 				return // cancelled while queued; the stale Op is cleared on the next reconcile
 			}

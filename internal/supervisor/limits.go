@@ -57,7 +57,7 @@ func (l *Limits) Acquire(ctx context.Context, kind string) (func(), error) {
 	id := l.next
 	queued := false
 	for {
-		if n := l.max[kind]; n <= 0 || l.cur[kind] < n {
+		if n := l.max[kind]; (n <= 0 || l.cur[kind] < n) && (w.Urgent || !l.urgentWaiting(kind, id)) {
 			break
 		}
 		if !queued {
@@ -72,6 +72,9 @@ func (l *Limits) Acquire(ctx context.Context, kind string) (func(), error) {
 		case <-ctx.Done():
 			l.mu.Lock()
 			delete(l.waiting, id)
+			if w.Urgent {
+				l.broadcast()
+			}
 			l.mu.Unlock()
 			return nil, ctx.Err()
 		}
@@ -94,6 +97,17 @@ func (l *Limits) Acquire(ctx context.Context, kind string) (func(), error) {
 			l.mu.Unlock()
 		})
 	}, nil
+}
+
+// urgentWaiting reports whether an urgent request other than id is waiting
+// for kind.
+func (l *Limits) urgentWaiting(kind string, id uint64) bool {
+	for k, w := range l.waiting {
+		if k != id && w.Kind == kind && w.Urgent {
+			return true
+		}
+	}
+	return false
 }
 
 // Usage reports current and peak holders per kind.

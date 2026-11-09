@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/reconciler"
 )
 
@@ -38,4 +39,36 @@ func TestLimitsQueueAndResize(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
+}
+
+func TestLimitsServeUrgentFirst(t *testing.T) {
+	l := NewLimits(map[string]int{"gate": 1})
+	ctx := context.Background()
+	hold, err := l.Acquire(ctx, "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := make(chan string, 2)
+	wait := func(name string, urgent bool) {
+		release, err := l.Acquire(reconciler.WithWaiter(ctx, reconciler.Waiter{Task: api.TaskID(name), Urgent: urgent}), "gate")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		order <- name
+		time.Sleep(10 * time.Millisecond)
+		release()
+	}
+	go wait("branch-check", false)
+	for len(l.State().Waiting) < 1 {
+		time.Sleep(time.Millisecond)
+	}
+	go wait("merge-check", true)
+	for len(l.State().Waiting) < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	hold()
+	if first, second := <-order, <-order; first != "merge-check" || second != "branch-check" {
+		t.Fatalf("served %s then %s; the merge check must go first", first, second)
+	}
 }

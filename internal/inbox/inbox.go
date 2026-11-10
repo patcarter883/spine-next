@@ -58,6 +58,7 @@ type Command struct {
 	Text string     `json:"text,omitempty"` // Hint; Retry (optional hint); PlanAccept (summary)
 	Seq  int        `json:"seq,omitempty"`  // Rollback: snapshot sequence number
 	Days int        `json:"days,omitempty"` // GC: keep anything newer than this
+	Via  string     `json:"via,omitempty"`  // "proposal": accepted from the supervisor's proposal
 }
 
 // Dir returns the inbox directory for a git common dir.

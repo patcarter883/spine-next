@@ -45,6 +45,7 @@ Other commands:
 | `spine cancel ID` | Stop the agent and release the worktree. |
 | `spine ui` | The web dashboard on `http://127.0.0.1:8765` (see [Dashboard](#dashboard)). |
 | `spine hint ID "text"` | Give the next repair round a hint. An escalated task resumes in its kept worktree. |
+| `spine accept ID` | Do what the LLM supervisor proposed when it escalated the task (see [M3](#m3-llm-supervisor)). |
 | `spine rollback ID SNAPSHOT` | Continue a stopped task from one of its snapshots. |
 | `spine plan "goal"` | A planner agent proposes a task breakdown for review; `plan validate FILE` and `plan submit FILE` check and submit a plan. |
 | `spine gates check [REV]` | Dry-run the gates on `main` (or REV) with no agent: which gates a task can pass. |
@@ -254,10 +255,11 @@ supervisor:
 
 Credentials come from the environment, the same way the Anthropic SDK finds them: `ANTHROPIC_API_KEY`, `ant auth login`, and so on. How it works:
 
-1. When a round fails, Spine sends the model a typed observation: the budget, round history, new failures only, and the rule supervisor's suggestion.
+1. When a round fails, Spine sends the model a typed observation: the budget, round history, new failures only (each marked as in a file the change touched or not), the end of an undiagnosed gate's output, the files the attempt changed, whether the last round changed anything, its earlier decisions and people's hints on this attempt, and the rule supervisor's suggestion.
 2. The model must answer with a JSON object matching a schema (structured output). The schema's `action` enum lists only the currently legal actions.
 3. The reconciler re-checks legality. If the model call errors, the model refuses, or the output is invalid or illegal, the rule supervisor decides instead.
 4. Every decision event records which supervisor decided, plus the fallback reason if there was one.
+5. An escalation can carry a proposal: a hint to resume with, a fresh attempt with a hint, or globs to add to the scope before retrying. The dashboard shows it on the task with an **Accept** button, `spine status` prints it, and `spine accept ID` sends it. Accepting sends the ordinary `hint`, `retry` or `edit` command, so nothing happens that you couldn't do by hand. **Quality** shows how many proposals were accepted.
 
 The model never writes status, and it cannot choose Verify or Merge.
 

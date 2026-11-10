@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -199,5 +200,72 @@ func TestUnparsedFailureOutputReachesSupervisorAndAgent(t *testing.T) {
 	out := agent.Prompt{Task: "t", Attempt: 1, Round: 2, Intent: "x", Feedback: fb}.Render()
 	if !strings.Contains(out, "The end of its output:\n\n```\nPHP Fatal error: Cannot redeclare iaSowing()\n```") {
 		t.Fatalf("prompt:\n%s", out)
+	}
+}
+
+// An escalation carries the model's proposal; "none", or a proposal with
+// nothing to do, carries none. The model sees what the change touched,
+// whether each failure is in it, whether the last round changed anything,
+// and its earlier calls; "scope" is offered only to a task with a scope.
+func TestLLMSupervisorProposalAndChangeContext(t *testing.T) {
+	o := obs()
+	o.Spec.Scope = []string{"pkg/**"}
+	o.Gate.Gates[0].New[0].File = "pkg/a.go"
+	o.ChangedFiles = []string{"pkg/a.go"}
+	o.TreeUnchanged = true
+	o.Earlier = []EarlierDecision{{Round: 0, Decision: api.Decision{Action: api.ActPatchWorker, Reason: "LocalFix", Hint: "look at pkg/a.go"}}}
+	s, last := fakeAPI(t, 200, `{"action":"Escalate","reason":"OutOfScope","hint":"needs lib","focus":[],"proposal":{"kind":"scope","text":"A calls into lib.","scope":[" lib/** ",""]}}`, "end_turn")
+	d, err := s.Decide(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := d.Proposal; p == nil || p.Kind != api.ProposeScope || len(p.Scope) != 1 || p.Scope[0] != "lib/**" || p.Text != "A calls into lib." {
+		t.Fatalf("proposal %+v", d.Proposal)
+	}
+	var req struct {
+		Messages []struct {
+			Content []struct{ Text string } `json:"content"`
+		} `json:"messages"`
+		OutputConfig struct {
+			Format struct {
+				Schema struct {
+					Properties struct {
+						Proposal struct {
+							Properties struct {
+								Kind struct{ Enum []string } `json:"kind"`
+							} `json:"properties"`
+						} `json:"proposal"`
+					} `json:"properties"`
+				} `json:"schema"`
+			} `json:"format"`
+		} `json:"output_config"`
+	}
+	if err := json.Unmarshal(*last, &req); err != nil {
+		t.Fatal(err)
+	}
+	if k := req.OutputConfig.Format.Schema.Properties.Proposal.Properties.Kind.Enum; !slices.Equal(k, []string{"none", "hint", "retry", "scope"}) {
+		t.Fatalf("proposal kinds %v", k)
+	}
+	body := req.Messages[0].Content[0].Text
+	for _, want := range []string{`"files_changed": [`, `"pkg/a.go"`, `"in_change": true`, `"tree_unchanged_since_last_round": true`, `"hint": "look at pkg/a.go"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("observation lacks %s:\n%s", want, body)
+		}
+	}
+
+	o.Spec.Scope = nil
+	for _, reply := range []string{
+		`{"action":"Escalate","reason":"X","hint":"","focus":[],"proposal":{"kind":"none","text":"","scope":[]}}`,
+		`{"action":"Escalate","reason":"X","hint":"","focus":[],"proposal":{"kind":"hint","text":"  ","scope":[]}}`,
+		`{"action":"Escalate","reason":"X","hint":"","focus":[],"proposal":{"kind":"scope","text":"x","scope":[" "]}}`,
+	} {
+		s, last := fakeAPI(t, 200, reply, "end_turn")
+		d, err := s.Decide(context.Background(), o)
+		if err != nil || d.Proposal != nil {
+			t.Fatalf("%s: %+v %v", reply, d.Proposal, err)
+		}
+		if !strings.Contains(string(*last), `"enum":["none","hint","retry"]`) {
+			t.Fatalf("scope offered to a whole-repository task: %s", *last)
+		}
 	}
 }

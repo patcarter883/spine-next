@@ -345,6 +345,16 @@ func printStatus(t api.Task) {
 	if s.IntegratedCommit != "" {
 		fmt.Printf("commit    %s\n", s.IntegratedCommit)
 	}
+	if p := s.Proposal; p != nil && s.Phase == api.PhaseEscalated {
+		fmt.Printf("proposal  %s", p.Kind)
+		if len(p.Scope) > 0 {
+			fmt.Printf(" +%s", strings.Join(p.Scope, " +"))
+		}
+		if p.Text != "" {
+			fmt.Printf(": %s", p.Text)
+		}
+		fmt.Printf("\n          (spine accept %s)\n", t.ID)
+	}
 	var conds []string
 	for _, c := range s.Conditions {
 		conds = append(conds, fmt.Sprintf("%s=%v", c.Type, c.Status))
@@ -460,6 +470,43 @@ func runCommand(ctx context.Context, kind inbox.Kind, args []string) error {
 		return err
 	}
 	fmt.Printf("%s %s: queued\n", kind, pos[0])
+	if !running {
+		fmt.Println("no controller is running; it applies when `spine controller` starts")
+	}
+	return nil
+}
+
+func runAccept(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("accept", flag.ContinueOnError)
+	repo := fs.String("repo", ".", "repository")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) != 1 {
+		return errors.New("accept: give a task id")
+	}
+	st, err := openRead(ctx, *repo)
+	if err != nil {
+		return err
+	}
+	t, err := st.GetTask(ctx, api.TaskID(pos[0]))
+	st.Close()
+	if err != nil {
+		return err
+	}
+	cmd, err := inbox.Accept(t, os.Getenv("USER"))
+	if err != nil {
+		return err
+	}
+	running, _, cd, err := controllerRunning(*repo)
+	if err != nil {
+		return err
+	}
+	if _, err := inbox.Write(inbox.Dir(cd), cmd); err != nil {
+		return err
+	}
+	fmt.Printf("accept %s: queued %s\n", pos[0], cmd.Kind)
 	if !running {
 		fmt.Println("no controller is running; it applies when `spine controller` starts")
 	}

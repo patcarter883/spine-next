@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -727,6 +728,7 @@ func (c *Controller) decide(ctx context.Context, t *api.Task, b api.Budget, snap
 		obs.HasBest = true
 		obs.BestIsLast = best.Commit == snap.Commit
 	}
+	c.observeChange(ctx, t, snap, &obs)
 	by := c.Supervisor.Name()
 	d, err := c.Supervisor.Decide(ctx, obs)
 	var fallback string
@@ -741,6 +743,9 @@ func (c *Controller) decide(ctx context.Context, t *api.Task, b api.Budget, snap
 	if fallback != "" {
 		d = RuleSupervisor{}.decide(obs)
 		by = "rules (fallback)"
+	}
+	if d.Action != api.ActEscalate {
+		d.Proposal = nil
 	}
 	if len(d.Hint) > 500 {
 		d.Hint = d.Hint[:500]
@@ -777,9 +782,50 @@ func (c *Controller) decide(ctx context.Context, t *api.Task, b api.Budget, snap
 		})
 		return Result{Requeue: true}, err
 	case api.ActEscalate:
-		return c.escalate(ctx, t, d.Reason, d.Hint)
+		return c.escalateProposing(ctx, t, d.Reason, d.Hint, d.Proposal)
 	default:
 		return c.finish(ctx, t, api.PhaseFailed, d.Reason, d.Hint)
+	}
+}
+
+// observeChange adds what the attempt has done so far: the files it
+// changed, whether its last round changed anything, and earlier decisions.
+// Each is best effort; a supervisor decides without what it cannot read.
+func (c *Controller) observeChange(ctx context.Context, t *api.Task, snap *api.SnapshotRef, obs *Observation) {
+	if snap == nil {
+		return
+	}
+	if lease, err := c.Store.GetLease(ctx, string(t.ID), t.Status.Attempt); err == nil && lease.BaseOID != "" {
+		if cs, err := (gitro.Repo{Dir: c.WT.Primary()}).DiffTrees(ctx, lease.BaseOID, snap.Commit); err == nil {
+			for _, ch := range cs {
+				obs.ChangedFiles = append(obs.ChangedFiles, ch.Path)
+			}
+		}
+	}
+	var prev *api.SnapshotRef
+	for i := range t.Status.Snapshots {
+		sn := &t.Status.Snapshots[i]
+		if sn.Attempt == t.Status.Attempt && sn.Seq < snap.Seq && (prev == nil || sn.Seq > prev.Seq) {
+			prev = sn
+		}
+	}
+	obs.TreeUnchanged = prev != nil && prev.Tree == snap.Tree
+	evs, err := c.Store.ListEvents(ctx, t.ID, 0, 0)
+	if err != nil {
+		return
+	}
+	for _, e := range evs {
+		if e.Kind != "decision" {
+			continue
+		}
+		var d struct {
+			Attempt  int          `json:"attempt"`
+			Round    int          `json:"round"`
+			Decision api.Decision `json:"decision"`
+		}
+		if json.Unmarshal(e.Data, &d) == nil && d.Attempt == t.Status.Attempt {
+			obs.Earlier = append(obs.Earlier, EarlierDecision{Round: d.Round, Decision: d.Decision})
+		}
 	}
 }
 
@@ -827,8 +873,12 @@ func feedback(o Observation, d api.Decision) []api.Feedback {
 // - Terminal transitions -
 
 func (c *Controller) escalate(ctx context.Context, t *api.Task, reason, msg string) (Result, error) {
+	return c.escalateProposing(ctx, t, reason, msg, nil)
+}
+
+func (c *Controller) escalateProposing(ctx context.Context, t *api.Task, reason, msg string, p *api.Proposal) (Result, error) {
 	_, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
-		s.Phase, s.Reason, s.Message, s.Op = api.PhaseEscalated, reason, msg, nil
+		s.Phase, s.Reason, s.Message, s.Op, s.Proposal = api.PhaseEscalated, reason, msg, nil, p
 		return nil
 	})
 	c.releaseSlot(t.ID) // the worktree is kept for a human; the slot is not

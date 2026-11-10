@@ -26,7 +26,7 @@ func (c *Controller) restart(ctx context.Context, t *api.Task, spec api.Spec, re
 	spec.Budget = b
 	_, err := c.Store.UpdateSpec(ctx, t.ID, 0, spec, func(s *api.Status) {
 		s.Phase, s.Reason, s.Message = api.PhasePending, reason, ""
-		s.PatchRound, s.Worktree, s.Op, s.NextFeedback, s.ResumeFrom = 0, nil, nil, nil, nil
+		s.PatchRound, s.Worktree, s.Op, s.NextFeedback, s.ResumeFrom, s.Proposal = 0, nil, nil, nil, nil, nil
 		s.StartedAt = time.Now().UTC()
 		if fn != nil {
 			fn(s)
@@ -47,7 +47,7 @@ func (c *Controller) liveLease(ctx context.Context, t *api.Task) (storage.Lease,
 // resumeInPlace starts another repair round in the task's kept worktree.
 func (c *Controller) resumeInPlace(ctx context.Context, t *api.Task, reason string, fb []api.Feedback, fn func(*api.Status)) error {
 	_, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceHuman, func(s *api.Status) error {
-		s.Phase, s.Reason, s.Message, s.Op = api.PhaseProvisioned, reason, "", nil
+		s.Phase, s.Reason, s.Message, s.Op, s.Proposal = api.PhaseProvisioned, reason, "", nil, nil
 		s.PatchRound++
 		s.NextFeedback = fb
 		if fn != nil {
@@ -112,7 +112,12 @@ func (c *Controller) applyMore(ctx context.Context, t *api.Task, cmd inbox.Comma
 			_, err := c.Store.UpdateSpec(ctx, t.ID, 0, spec, func(s *api.Status) { s.Reason, s.Message = "Edited", "" })
 			return err
 		case stopped:
-			return c.restart(ctx, t, spec, "EditedAndRetried", nil)
+			var hint func(*api.Status)
+			if txt := strings.TrimSpace(cmd.Text); txt != "" {
+				h := api.Hint{Text: trunc(txt, MaxHint), By: cmd.By, At: cmd.At}
+				hint = func(s *api.Status) { s.Hints = append(s.Hints, h) }
+			}
+			return c.restart(ctx, t, spec, "EditedAndRetried", hint)
 		}
 		return perm("%s is %s: only a pending or stopped task can be edited", t.ID, ph)
 

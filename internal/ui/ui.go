@@ -605,6 +605,10 @@ var commandKinds = map[string]inbox.Kind{"approve": inbox.Approve, "retry": inbo
 	"hint": inbox.Hint, "edit": inbox.Edit, "rollback": inbox.Rollback}
 
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("action") == "accept" {
+		s.accept(w, r)
+		return
+	}
 	k, ok := commandKinds[r.PathValue("action")]
 	if !ok {
 		httpError(w, http.StatusNotFound, "unknown action")
@@ -626,6 +630,26 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	note(r, repo.Name, string(t.ID), string(k)+" "+trunc(req.Text, 200))
+	cid, err := inbox.Write(repo.InboxDir, cmd)
+	if err != nil {
+		httpError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"queued": cid, "controller": repo.State == "running"})
+}
+
+// accept sends the command an escalated task's proposal names.
+func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
+	repo, t, ok := s.getTask(w, r)
+	if !ok {
+		return
+	}
+	cmd, err := inbox.Accept(t, by(r))
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	note(r, repo.Name, string(t.ID), "accept "+string(t.Status.Proposal.Kind)+" "+trunc(cmd.Text, 200))
 	cid, err := inbox.Write(repo.InboxDir, cmd)
 	if err != nil {
 		httpError(w, 500, err.Error())

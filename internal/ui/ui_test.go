@@ -316,3 +316,67 @@ func TestPlanReviewIgnoresItsOwnProposal(t *testing.T) {
 		t.Fatalf("another plan proposing the same id must still warn: %s", is)
 	}
 }
+
+// Accept sends the command an escalated task's proposal names, and refuses
+// a task without one.
+func TestAcceptProposal(t *testing.T) {
+	ctx := context.Background()
+	f := newRepo(t, "t1", "t2")
+	f.w.UpdateStatus(ctx, "t1", 0, api.SourceController, func(s *api.Status) error {
+		s.Phase, s.Reason = api.PhaseEscalated, "PreExistingFailure"
+		s.Proposal = &api.Proposal{Kind: api.ProposeHint, Text: "rename the helper"}
+		return nil
+	})
+	src := SourceFunc(func(context.Context) []Repo {
+		return []Repo{{Name: "alpha", State: "running", Store: f.ro, InboxDir: f.inbox}}
+	})
+	srv := httptest.NewServer((&Server{Source: src}).Handler())
+	defer srv.Close()
+	post := func(id string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/api/repos/alpha/tasks/"+id+"/accept", nil)
+		req.Header.Set("X-Spine", "1")
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.StatusCode
+	}
+	if c := post("t2"); c != 400 {
+		t.Fatalf("accept without a proposal: %d", c)
+	}
+	if c := post("t1"); c != 200 {
+		t.Fatalf("accept %d", c)
+	}
+	if es, _ := inbox.List(f.inbox); len(es) != 1 || es[0].Kind != inbox.Hint || es[0].Task != "t1" || es[0].Text != "rename the helper" {
+		t.Fatalf("inbox %+v", es)
+	}
+}
+
+// Supervisor stats count the escalations that proposed a step and the
+// proposals a person accepted.
+func TestStatsCountAcceptedProposals(t *testing.T) {
+	ctx := context.Background()
+	f := newRepo(t, "t1", "t2")
+	p := &api.Proposal{Kind: api.ProposeHint, Text: "x"}
+	for _, ev := range []struct {
+		id   api.TaskID
+		kind string
+		data any
+	}{
+		{"t1", "decision", map[string]any{"supervisor": "llm:m", "decision": api.Decision{Action: api.ActEscalate, Proposal: p}}},
+		{"t1", "command", inbox.Command{Kind: inbox.Hint, Task: "t1", Text: "x", Via: "proposal"}},
+		{"t2", "decision", map[string]any{"supervisor": "llm:m", "decision": api.Decision{Action: api.ActEscalate, Proposal: p}}},
+		{"t2", "command", inbox.Command{Kind: inbox.Hint, Task: "t2", Text: "my own"}},
+	} {
+		if err := f.w.AppendEvent(ctx, ev.id, ev.kind, ev.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &Server{Source: SourceFunc(func(context.Context) []Repo {
+		return []Repo{{Name: "alpha", State: "running", Store: f.ro, InboxDir: f.inbox}}
+	})}
+	sups := s.computeStats(ctx, 7, "").Quality.Supervisors
+	if len(sups) != 1 || sups[0].Proposals != 2 || sups[0].Accepted != 1 {
+		t.Fatalf("%+v", sups)
+	}
+}

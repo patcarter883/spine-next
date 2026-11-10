@@ -104,3 +104,4 @@ svg text{font-family:system-ui,sans-serif}
 .gauge.full>div{background:var(--warn)}
 .login{max-width:380px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px}
 .login input{width:100%;margin:10px 0}
+.proposal{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--panel);border-radius:6px;padding:8px 12px;margin:10px 0}.proposal p{margin:0 0 6px}.proposal blockquote{margin:0 0 8px;color:var(--muted);white-space:pre-wrap}

@@ -268,11 +268,19 @@ async function loadDetail(soft) {
   }
   d.innerHTML = `<h2>${sp.kind ? `<span class="kindtag">${esc(sp.kind)}</span> ` : ""}${esc(sp.title || sp.intent.split("\n")[0])}</h2>
    <span class="badge b-${esc(s.phase)}">${esc(s.phase)}</span> <span class="mono">${esc(s.reason || "")}</span> ${s.message ? `<span class="muted">— ${esc(s.message)}</span>` : ""}
+   ${proposalBox(s)}
    <div class="actions">${acts.join("")}</div>
    <div class="tabs">${tabs.map(([k, l]) => `<a href="#/tasks/${enc(r)}/${enc(id)}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</div><div id="tab"></div>`;
   $$("#detail .actions button").forEach(b => b.onclick = () => taskAction(b.dataset.a, r, t));
+  const pa = $("#paccept"); if (pa) pa.onclick = () => command(r, id, "accept");
   const fn = { overview: tabOverview, changes: tabChanges, rounds: tabRounds, logs: tabLogs, live: tabLive, planreview: tabPlanReview }[tab] || tabOverview;
   fn(r, t);
+}
+function proposalBox(s) {
+  const p = s.proposal;
+  if (s.phase !== "Escalated" || !p) return "";
+  const what = { hint: "Resume the agent with this hint", retry: "Start a fresh attempt" + (p.text ? " with this hint" : ""), scope: `Add ${(p.scope || []).map(g => `<code>${esc(g)}</code>`).join(", ")} to the scope and retry` }[p.kind] || esc(p.kind);
+  return `<div class="proposal"><p><b>Supervisor proposes:</b> ${what}</p>${p.text ? `<blockquote>${esc(p.text)}</blockquote>` : ""}${can("operator") ? `<button class="btn primary small" id="paccept">Accept</button>` : ""}</div>`;
 }
 const pendingNote = {};
 async function command(r, id, action, body) {
@@ -860,9 +868,9 @@ async function viewQuality() {
       const better = r.with_n && r.without_n ? ((r.lower_is_better ? r.with < r.without : r.with > r.without) ? '<span class="pass">context better</span>' : r.with === r.without ? '<span class="muted">same</span>' : '<span class="warn">context worse</span>') : '<span class="muted">not enough data</span>';
       return `<tr><td>${esc(r.metric)}</td><td class="num">${r.with_n ? f(r.with) : "—"} <span class="muted">(n=${r.with_n})</span></td><td class="num">${r.without_n ? f(r.without) : "—"} <span class="muted">(n=${r.without_n})</span></td><td>${better}</td></tr>` }).join("")}</table></section>
    <section class="card"><h3>Supervisor decisions: LLM vs rules</h3><p class="hint">Each failed round goes to a supervisor (rules, or the LLM with a rules fallback). “Improved” counts decisions whose next gated round failed fewer checks — the M3 comparison.</p>
-   ${q.supervisors.length ? `<table><tr><th>Supervisor</th><th class="num">Decisions</th><th>Actions</th><th class="num">Fallbacks</th><th class="num">Improved next round</th><th class="num">Tasks</th><th class="num">…integrated</th></tr>
+   ${q.supervisors.length ? `<table><tr><th>Supervisor</th><th class="num">Decisions</th><th>Actions</th><th class="num">Fallbacks</th><th class="num">Proposals accepted</th><th class="num">Improved next round</th><th class="num">Tasks</th><th class="num">…integrated</th></tr>
     ${q.supervisors.map(x => `<tr><td class="mono">${esc(x.supervisor)}</td><td class="num">${x.decisions}</td><td>${Object.entries(x.actions).map(([k, v]) => `${esc(k)} ${v}`).join(", ")}</td><td class="num">${x.fallbacks}</td>
-     <td class="num">${x.followed ? Math.round(100 * x.improved / x.followed) + "%" : "—"} <span class="muted">(${x.improved}/${x.followed})</span></td><td class="num">${x.tasks}</td><td class="num">${x.tasks ? Math.round(100 * x.integrated / x.tasks) + "%" : "—"}</td></tr>`).join("")}</table>` : `<p class="muted">No decisions in this period.</p>`}</section></div>`;
+     <td class="num">${x.proposals ? `${x.accepted}/${x.proposals}` : "—"}</td><td class="num">${x.followed ? Math.round(100 * x.improved / x.followed) + "%" : "—"} <span class="muted">(${x.improved}/${x.followed})</span></td><td class="num">${x.tasks}</td><td class="num">${x.tasks ? Math.round(100 * x.integrated / x.tasks) + "%" : "—"}</td></tr>`).join("")}</table>` : `<p class="muted">No decisions in this period.</p>`}</section></div>`;
   bindDays(viewQuality);
 }
 

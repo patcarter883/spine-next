@@ -58,6 +58,10 @@ type supStat struct {
 	Improved  int `json:"improved"`
 	Followed  int `json:"followed"` // decisions with a later gated round
 	Fallbacks int `json:"fallbacks"`
+	// Proposals are escalations that proposed a next step; Accepted, those
+	// a person accepted.
+	Proposals int `json:"proposals"`
+	Accepted  int `json:"accepted"`
 }
 
 type stats struct {
@@ -268,6 +272,7 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 	var queue, approval []float64
 	escal, failGates, failReasons, outcomes := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}
 	sups := map[string]*supStat{}
+	proposer := map[api.TaskID]string{}
 	var rounds, attempts []float64
 	var costs []taskCost
 	ctxTasks := map[string]*ctxTask{}
@@ -433,8 +438,13 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 			case "command":
 				var c struct {
 					Kind string `json:"kind"`
+					Via  string `json:"via"`
 				}
 				json.Unmarshal(e.Data, &c)
+				if sp := sups[proposer[e.TaskID]]; sp != nil && c.Via == "proposal" {
+					sp.Accepted++
+					delete(proposer, e.TaskID)
+				}
 				if c.Kind == "approve" {
 					if at, ok := escAt[e.TaskID]; ok {
 						approval = append(approval, e.At.Sub(at).Minutes())
@@ -473,7 +483,8 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 					Supervisor string   `json:"supervisor"`
 					Fallback   string   `json:"fallback_reason"`
 					Decision   struct {
-						Action string `json:"action"`
+						Action   string        `json:"action"`
+						Proposal *api.Proposal `json:"proposal"`
 					} `json:"decision"`
 				}
 				json.Unmarshal(e.Data, &d)
@@ -493,6 +504,11 @@ func (s *Server) computeStats(ctx context.Context, days int, only string) stats 
 				sp.Actions[d.Decision.Action]++
 				if d.Fallback != "" {
 					sp.Fallbacks++
+				}
+				delete(proposer, e.TaskID)
+				if d.Decision.Proposal != nil {
+					sp.Proposals++
+					proposer[e.TaskID] = name
 				}
 				// The failure count of the round being decided on.
 				n := -1

@@ -23,6 +23,18 @@ type Observation struct {
 	HasBest     bool
 	BestIsLast  bool
 	FailsOnBase bool // the gate failed on the merge result, not the branch
+	// ChangedFiles are the paths the attempt changed against its base.
+	ChangedFiles []string
+	// TreeUnchanged: the agent's last round left the tree as it was.
+	TreeUnchanged bool
+	// Earlier are this attempt's previous decisions, oldest first.
+	Earlier []EarlierDecision
+}
+
+// EarlierDecision is a decision taken on an earlier round.
+type EarlierDecision struct {
+	Round int
+	api.Decision
 }
 
 // Supervisor maps an observation to a decision. RuleSupervisor is

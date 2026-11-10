@@ -63,6 +63,8 @@ func main() {
 		err = runCommand(ctx, inbox.Cancel, args)
 	case "hint":
 		err = runCommand(ctx, inbox.Hint, args)
+	case "accept":
+		err = runAccept(ctx, args)
 	case "rollback":
 		err = runCommand(ctx, inbox.Rollback, args)
 	case "pause":
@@ -123,6 +125,7 @@ commands:
   retry ID    give an escalated or failed task another attempt
   cancel ID   stop a task and release its worktree
   hint ID "text"       give the next repair round a hint (resumes an escalated task)
+  accept ID            do what the supervisor proposed for an escalated task
   rollback ID SNAPSHOT continue a stopped task from one of its snapshots
   pause [reason] | resume   stop/allow starting new tasks in this repository
   doctor    check environment, store and repository invariants

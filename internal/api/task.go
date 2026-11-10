@@ -274,6 +274,8 @@ type Status struct {
 	ResumeFrom *SnapshotRef `json:"resume_from,omitempty"`
 	// Plan is a planner task's proposed breakdown.
 	Plan *Plan `json:"plan,omitempty"`
+	// Proposal is the supervisor's suggestion for an escalated task.
+	Proposal *Proposal `json:"proposal,omitempty"`
 }
 
 // Hint is a person's note for the next repair round.
@@ -391,4 +393,23 @@ type Decision struct {
 	Hint     string     `json:"hint,omitempty"`
 	Focus    []string   `json:"focus,omitempty"`
 	Reason   string     `json:"reason"`
+	// Proposal, on an escalation, is what the supervisor suggests a person
+	// do; accepting it sends the matching command.
+	Proposal *Proposal `json:"proposal,omitempty"`
+}
+
+// ProposalKind is the command a proposal turns into when accepted.
+type ProposalKind string
+
+const (
+	ProposeHint  ProposalKind = "hint"  // resume with Text as a hint
+	ProposeRetry ProposalKind = "retry" // fresh attempt, Text as its hint
+	ProposeScope ProposalKind = "scope" // add Scope to the spec and retry
+)
+
+// Proposal is a supervisor's suggested way out of an escalation.
+type Proposal struct {
+	Kind  ProposalKind `json:"kind"`
+	Text  string       `json:"text,omitempty"`
+	Scope []string     `json:"scope,omitempty"`
 }

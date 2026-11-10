@@ -710,11 +710,16 @@ func (c *Controller) integrate(ctx context.Context, t *api.Task, b api.Budget, s
 func (c *Controller) decide(ctx context.Context, t *api.Task, b api.Budget, snap *api.SnapshotRef, conflicts []string, failsOnBase bool) (Result, error) {
 	obs := Observation{Spec: t.Spec, Status: t.Status, Outcome: t.Status.LastOutcome, Conflicts: conflicts, Budget: b,
 		Legal: legalActions(t, b), FailsOnBase: failsOnBase}
-	if g := t.Status.LastGate; g != nil && g.Attempt == t.Status.Attempt && g.Round == t.Status.PatchRound && (failsOnBase || g.Commit == snap.Commit) {
+	if g := t.Status.LastGate; g != nil && g.Attempt == t.Status.Attempt && g.Round == t.Status.PatchRound && (failsOnBase || g.OnMerge || g.Commit == snap.Commit) {
 		obs.Gate = g
 	}
 	for _, h := range t.Status.GateHistory {
-		if h.Attempt == t.Status.Attempt && !h.OnMerge {
+		if h.Attempt != t.Status.Attempt {
+			continue
+		}
+		if n := len(obs.History); n > 0 && obs.History[n-1].Round == h.Round {
+			obs.History[n-1] = h
+		} else {
 			obs.History = append(obs.History, h)
 		}
 	}

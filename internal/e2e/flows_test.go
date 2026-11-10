@@ -301,14 +301,49 @@ func TestMergeStageGateRunsOnlyOnTheMergeResult(t *testing.T) {
 				}
 			}
 		case "decision":
-			if strings.Contains(d, "FailsOnNewBase") {
-				t.Fatalf("a merge-stage failure is the change's, not the base's: %s", d)
+			if strings.Contains(d, "FailsOnNewBase") || strings.Contains(d, "NoVerdict") {
+				t.Fatalf("a merge-stage failure is the change's verdict to fix: %s", d)
+			}
+		case "agent_start":
+			if strings.Contains(d, `"round":1`) && !strings.Contains(d, `slow (cmd.run)`) {
+				t.Fatalf("round 1 is not told the merge-stage gate failed: %s", d)
 			}
 		}
 	}
 	if rounds != 2 || merges != 2 {
 		dumpEvents(t, a.Store, "m")
 		t.Fatalf("want 2 round verdicts and 2 merge checks, have %d and %d", rounds, merges)
+	}
+}
+
+// A merge-stage gate failing the same way two rounds running is no progress:
+// the next attempt starts fresh rather than patching again.
+func TestRepeatedMergeStageFailureIsNoProgress(t *testing.T) {
+	plan := map[string]map[string]any{"m": {
+		"a1r0": map[string]any{"write": map[string]string{"pkg/m.go": goFile("M"), "flag.txt": "no\n"}},
+		"a1r1": map[string]any{"write": map[string]string{"pkg/n.go": goFile("N")}},
+		"a2r0": map[string]any{"write": map[string]string{"pkg/m.go": goFile("M"), "flag.txt": "ok\n"}},
+	}}
+	h := newHarness(t, plan, 2)
+	h.repo.Write(map[string]string{".spine/gates.yaml": strings.Replace(gates, "order: [scope, nonempty, build, unit]\n", "", 1) +
+		"  slow:     {tool: cmd.run, stage: merge, args: {argv: [grep, -qx, ok, flag.txt]}}\norder: [scope, nonempty, build, unit, slow]\n"})
+	h.repo.Commit("merge-stage gate")
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	s := spec("add M", "pkg/**", "flag.txt")
+	inbox.Write(inbox.Dir(a.CommonDir), inbox.Command{Kind: inbox.Submit, Task: "m", Spec: &s})
+	tk := waitPhase(t, a, "m", api.PhaseIntegrated, "")
+	if tk.Status.Attempt != 2 {
+		dumpEvents(t, a.Store, "m")
+		t.Fatalf("want a fresh second attempt, have a%d r%d", tk.Status.Attempt, tk.Status.PatchRound)
+	}
+	evs, _ := a.Store.ListEvents(context.Background(), "m", 0, 0)
+	for _, e := range evs {
+		if e.Kind == "decision" && strings.Contains(string(e.Data), `"round":1`) && !strings.Contains(string(e.Data), "NoProgress") {
+			t.Fatalf("round 1 decision: %s", e.Data)
+		}
 	}
 }
 

@@ -83,6 +83,10 @@ type Invocation struct {
 	Args            json.RawMessage
 	// Timeout overrides Spec.Timeout when positive.
 	Timeout time.Duration
+	// BaselineOf, on a baseline run, is "<from tree> <to tree>" of the change
+	// being judged: {changed} expands to that change's files that exist in
+	// Tree, so the base is checked on the same paths.
+	BaselineOf string
 	// Recheck runs a Hermetic tool again instead of returning a cached
 	// failure: a test suite that failed once may pass on the same tree.
 	Recheck bool

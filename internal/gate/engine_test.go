@@ -9,6 +9,7 @@ import (
 	"github.com/patcarter883/spine-next/internal/api"
 	"github.com/patcarter883/spine-next/internal/testrepo"
 	"github.com/patcarter883/spine-next/internal/tools"
+	"github.com/patcarter883/spine-next/internal/tools/build"
 )
 
 func d(fp string) tools.Diagnostic {
@@ -193,5 +194,34 @@ func TestEvaluateRerunsACachedFlakyFailure(t *testing.T) {
 	}
 	if v := eval(); !v.Passed || !v.Gates[0].Cached || suite.runs[snapTree] != 2 {
 		t.Fatalf("a passing result is reused even with excused failures: %+v runs %v", v, suite.runs)
+	}
+}
+
+func TestBaselineOfAChangedFilesGateRunsTheBaseOnTheSamePaths(t *testing.T) {
+	ctx := context.Background()
+	repo := testrepo.New(t)
+	gates := "gates:\n  check: {tool: cmd.run, policy: baseline, args: {argv: [sh, -c, 'grep -l TODO \"$@\" && exit 1; exit 0', sh, \"{changed:**/*.md}\"]}}\norder: [check]\n"
+	repo.Write(map[string]string{ConfigPath: gates, "docs/a.md": "TODO\n"})
+	base := repo.Commit("base")
+	repo.Write(map[string]string{"docs/a.md": "TODO\nmore\n"})
+	edit := repo.Commit("edit")
+	repo.Write(map[string]string{"docs/b.md": "TODO\n"})
+	add := repo.Commit("add")
+
+	reg := tools.New(tools.Options{Cache: tools.NewMemCache()})
+	reg.MustRegister((&build.Runner{}).Tools()...)
+	e := &Engine{Reg: reg, ScratchDir: t.TempDir()}
+	eval := func(commit, base string) api.GateVerdict {
+		v, err := e.Evaluate(ctx, Request{Repo: repo.Dir, Commit: commit, Base: base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.Gates[0]
+	}
+	if g := eval(edit, base); g.BaseExitCode == nil || *g.BaseExitCode != 1 {
+		t.Fatalf("the base is checked on a.md, which fails there too: %+v", g)
+	}
+	if g := eval(add, edit); g.Passed() || g.BaseExitCode == nil || *g.BaseExitCode != 0 {
+		t.Fatalf("the base runs, without the new b.md, and passes: %+v", g)
 	}
 }

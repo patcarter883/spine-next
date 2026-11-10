@@ -161,7 +161,7 @@ func (e *Engine) Evaluate(ctx context.Context, req Request) (Verdict, error) {
 				if cur.ExitCode != 0 || hasErrors(cur.Diagnostics) || e.AlwaysBaseline {
 					b, err := e.Reg.Invoke(ctx, g.Tool, tools.Invocation{
 						Repo: req.Repo, Tree: baseTree, Commit: req.Base, Base: req.Base, Args: args, Timeout: g.Timeout,
-						BaseKey: baseTree + " " + baseTree, Materialize: mats.for_(baseTree),
+						BaseKey: baseTree + " " + baseTree, Materialize: mats.for_(baseTree), BaselineOf: mbTree + " " + tree,
 					})
 					if err != nil {
 						return api.GateVerdict{}, false, fmt.Errorf("gate %s (baseline): %w", name, err)

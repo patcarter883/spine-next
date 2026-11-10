@@ -24,6 +24,7 @@ import (
 
 	"github.com/patcarter883/spine-next/internal/artifacts"
 	"github.com/patcarter883/spine-next/internal/exec"
+	"github.com/patcarter883/spine-next/internal/gitro"
 	"github.com/patcarter883/spine-next/internal/tools"
 	"github.com/patcarter883/spine-next/internal/tools/diff"
 )
@@ -107,6 +108,9 @@ func (c *CmdRun) EnvKey(ctx context.Context, inv tools.Invocation) (string, erro
 	if err != nil || !usesChanged(a.Argv) {
 		return k, err
 	}
+	if inv.BaselineOf != "" {
+		k += "\x00of:" + inv.BaselineOf
+	}
 	if inv.BaseKey != "" {
 		return k + "\x00changed:" + inv.BaseKey, nil
 	}
@@ -141,9 +145,11 @@ func usesChanged(argv []string) bool {
 
 // expandChanged replaces each {changed} element with the files the change
 // adds or modifies (relative to the run's dir), and reports how many there
-// were. A run with none has nothing to check.
+// were. A run with none has nothing to check. On a baseline run the files
+// are those of the change being judged that exist on the base, and the count
+// is the change's, so the base runs whenever the change did.
 func expandChanged(ctx context.Context, inv tools.Invocation, a Args) ([]string, int, error) {
-	cs, _, err := diff.Changes(ctx, inv)
+	cs, onBase, err := changesFor(ctx, inv)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -163,11 +169,41 @@ func expandChanged(ctx context.Context, inv tools.Invocation, a Args) ([]string,
 			if c.Status == 'D' || !strings.HasPrefix(c.Path, prefix) || (m[1] != "" && !diff.MatchGlob(m[1], c.Path)) {
 				continue
 			}
-			out = append(out, strings.TrimPrefix(c.Path, prefix))
 			n++
+			if onBase == nil || onBase[c.Path] {
+				out = append(out, strings.TrimPrefix(c.Path, prefix))
+			}
 		}
 	}
 	return out, n, nil
+}
+
+func changesFor(ctx context.Context, inv tools.Invocation) ([]gitro.Change, map[string]bool, error) {
+	if inv.BaselineOf == "" {
+		cs, _, err := diff.Changes(ctx, inv)
+		return cs, nil, err
+	}
+	from, to, _ := strings.Cut(inv.BaselineOf, " ")
+	r := gitro.Repo{Dir: inv.Repo}
+	cs, err := r.DiffTrees(ctx, from, to)
+	if err != nil || len(cs) == 0 {
+		return cs, map[string]bool{}, err
+	}
+	args := []string{"ls-tree", "-r", "-z", "--name-only", inv.Tree, "--"}
+	for _, c := range cs {
+		args = append(args, c.Path)
+	}
+	out, err := r.Run(ctx, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	onBase := map[string]bool{}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			onBase[p] = true
+		}
+	}
+	return cs, onBase, nil
 }
 
 // envKey identifies the binary that will run and the environment values that

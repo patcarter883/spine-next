@@ -348,6 +348,7 @@ func (r *Runner) runPi(ctx context.Context, req RunRequest) (api.Outcome, error)
 	out.Duration = time.Since(start)
 	out.ExitCode, out.Signal = pd.res.ExitCode, pd.res.Signal
 	out.TokensUsed, out.CostUSD, out.Turns = g.tokens.Load(), g.cost, g.turns
+	out.WrappedUp = g.wrappedUp || g.turnsWarned
 	last := g.last
 	if last != nil {
 		out.StopReason = last.StopReason

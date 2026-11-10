@@ -194,6 +194,7 @@ type Outcome struct {
 	TokensUsed int64         `json:"tokens_used"`
 	CostUSD    float64       `json:"cost_usd,omitempty"`
 	Turns      int           `json:"turns,omitempty"`
+	WrappedUp  bool          `json:"wrapped_up,omitempty"` // told to finish before a limit cut the run off
 	Duration   time.Duration `json:"duration_ns"`
 	Message    string        `json:"message,omitempty"` // bounded
 }

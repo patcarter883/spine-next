@@ -14,6 +14,31 @@ import (
 	"github.com/patcarter883/spine-next/internal/inbox"
 )
 
+// A run told to wrap up and then cut off at its turn limit is judged on
+// what it left: here a complete change, which the gates pass.
+func TestPiRunCutOffAfterWrapUpIsGated(t *testing.T) {
+	h := newHarness(t, nil, 2)
+	dir := t.TempDir()
+	plan := map[string]any{"p/r0": map[string]any{"write": map[string]string{"pkg/p.go": goFile("P"), "pkg/p_test.go": goTest("P", 2)}, "turns": 50}}
+	b, _ := json.Marshal(plan)
+	pf := filepath.Join(dir, "plan.json")
+	os.WriteFile(pf, b, 0o644)
+	h.cfg.Agent = "pi"
+	h.cfg.Adapters["pi"] = agent.Adapter{Name: "pi", Protocol: "pi-rpc", Argv: []string{fakePiBin}, Version: "1.5.0",
+		Model: "local/qwen3-coder", StallTimeout: time.Minute, ToolTimeout: time.Minute, MaxTurns: 8,
+		Env: map[string]string{"FAKE_PI_PLAN": pf, "FAKE_PI_LOG": filepath.Join(dir, "log")}}
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	s := spec("add P", "pkg/**")
+	inbox.Write(inbox.Dir(a.CommonDir), inbox.Command{Kind: inbox.Submit, Task: "p", Spec: &s})
+	tk := waitPhase(t, a, "p", api.PhaseIntegrated, "")
+	if out := tk.Status.LastOutcome; out == nil || out.Reason != api.OutcomeBudgetExceeded || !out.WrappedUp || tk.Status.PatchRound != 0 {
+		t.Fatalf("round %d outcome %+v", tk.Status.PatchRound, tk.Status.LastOutcome)
+	}
+}
+
 // A Pi (RPC) adapter through the whole controller: round 0 fails a gate,
 // round 1 receives the failing test as feedback and fixes it; the run's
 // tokens are recorded (the fake reports usage on each of two assistant

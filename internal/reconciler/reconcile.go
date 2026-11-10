@@ -71,7 +71,9 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 		if err != nil {
 			return Result{}, err
 		}
-		if out.Reason != api.OutcomeCompleted {
+		finished := out.Reason == api.OutcomeCompleted ||
+			(out.Reason == api.OutcomeBudgetExceeded && out.WrappedUp && t.Spec.Kind == "")
+		if !finished {
 			// Do not gate a half-written tree; let the supervisor choose.
 			return c.decide(ctx, &t, b, snap, nil, false)
 		}

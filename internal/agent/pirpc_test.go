@@ -152,6 +152,15 @@ func TestPiWrapUpSteer(t *testing.T) {
 	}
 }
 
+func TestPiTurnsSteerPlannerToWritePlan(t *testing.T) {
+	e := setup(t, map[string]map[string]any{"*": {"turns": 50}})
+	out, _, _ := e.runPi(t, func(a *Adapter, r *RunRequest) { a.MaxTurns = 16; r.Prompt.Plan = true })
+	steers, _ := os.ReadFile(filepath.Join(e.log, "steers"))
+	if !strings.Contains(string(steers), "write "+PlanFile+" now") || strings.Count(string(steers), "turns left") != 1 {
+		t.Fatalf("steers %q (outcome %+v)", steers, out)
+	}
+}
+
 func TestPiVersionPinned(t *testing.T) {
 	e := setup(t, map[string]map[string]any{"*": {}})
 	_, _, err := e.runPi(t, func(a *Adapter, _ *RunRequest) { a.Version = "1.6.0" })

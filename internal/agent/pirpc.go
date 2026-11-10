@@ -33,7 +33,7 @@ import (
 //   - a tool call running past ToolTimeout is aborted and the session is
 //     told to continue without it (twice; the third ends the run);
 //   - assistant turns, tokens, stalls and wall clock are bounded; near the
-//     time limit Pi is steered to wrap up;
+//     turn or time limit Pi is steered to wrap up;
 //   - success is read from the final assistant message's stopReason and
 //     agent_settled, never from the exit code.
 
@@ -484,6 +484,7 @@ type piGuard struct {
 	continuation string
 	toolTimeouts int
 	wrappedUp    bool
+	turnsWarned  bool
 	aborting     bool
 	abortedAt    time.Time
 }
@@ -542,6 +543,10 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 				g.turns++
 				if g.turns > g.a.MaxTurns && reason == "" && !g.aborting {
 					reason, _ = g.abort(api.OutcomeBudgetExceeded, fmt.Sprintf("turn limit: more than %d assistant turns", g.a.MaxTurns))
+				} else if left := g.a.MaxTurns - g.turns; !g.turnsWarned && left < max(2, g.a.MaxTurns/8) {
+					g.turnsWarned = true
+					g.emit(Event{Kind: "guard", Title: "steer", Detail: "turns nearly used"})
+					go g.conn.call(context.Background(), "steer", map[string]any{"message": turnsSteer(g.req.Prompt, left)})
 				}
 			case "tool_execution_start":
 				t := piTool{name: ev.ToolName, title: toolTitle(ev.ToolName, ev.Args), start: time.Now()}
@@ -640,6 +645,16 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 			}
 		}
 	}
+}
+
+func turnsSteer(p Prompt, left int) string {
+	switch {
+	case p.Plan:
+		return fmt.Sprintf("You have %d turns left. Stop researching and write %s now from what you know, marking any fact you have not checked as unverified, then stop.", left, PlanFile)
+	case p.Survey:
+		return fmt.Sprintf("You have %d turns left. Stop researching and write the files you were asked for now from what you know, then stop.", left)
+	}
+	return fmt.Sprintf("You have %d turns left. Finish the change you are making, make sure the code compiles, and stop.", left)
 }
 
 // ProbePi checks a pi-rpc adapter without spending tokens: the pinned

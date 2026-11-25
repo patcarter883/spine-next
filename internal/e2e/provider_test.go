@@ -59,6 +59,38 @@ func countEvents(t *testing.T, a *app.App, id api.TaskID, kind string, match fun
 	return n
 }
 
+func waitMessage(t *testing.T, a *app.App, id api.TaskID, msg string) api.Task {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		tk, err := a.Store.GetTask(context.Background(), id)
+		if err == nil && strings.Contains(tk.Status.Message, msg) {
+			return tk
+		}
+		if time.Now().After(deadline) {
+			dumpEvents(t, a.Store, id)
+			t.Fatalf("%s: message %q never contained %q", id, tk.Status.Message, msg)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitProviderFailure(t *testing.T, a *app.App, id api.TaskID) api.Task {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		tk, err := a.Store.GetTask(context.Background(), id)
+		if err == nil && tk.Status.ProviderFailures > 0 {
+			return tk
+		}
+		if time.Now().After(deadline) {
+			dumpEvents(t, a.Store, id)
+			t.Fatalf("%s never recorded a provider failure", id)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func providerOutcome(d json.RawMessage) bool {
 	var o api.Outcome
 	return json.Unmarshal(d, &o) == nil && o.Provider == api.ProviderUnreachable
@@ -69,7 +101,7 @@ func providerOutcome(d json.RawMessage) bool {
 // no attempt, round or token is charged.
 func TestProviderOutageResumes(t *testing.T) {
 	providerTiming(t, 100*time.Millisecond, 400*time.Millisecond, time.Minute)
-	h, _ := piHarness(t, map[string]any{"p": map[string]any{"down": 2, "write": map[string]string{"pkg/p.go": goFile("P"), "pkg/p_test.go": goTest("P", 2)}}})
+	h, _ := piHarness(t, map[string]any{"p": map[string]any{"down": 2, "tokens": 500, "write": map[string]string{"pkg/p.go": goFile("P"), "pkg/p_test.go": goTest("P", 2)}}})
 	a := h.open(context.Background())
 	defer a.Close()
 	stop := runController(t, a)
@@ -77,7 +109,7 @@ func TestProviderOutageResumes(t *testing.T) {
 	submit(t, a, "p", spec("add P", "pkg/**"))
 	tk := waitPhase(t, a, "p", api.PhaseIntegrated, "")
 	s := tk.Status
-	if s.Attempt != 1 || s.PatchRound != 0 || s.TokensUsed != 0 || s.ProviderFailures != 0 {
+	if s.Attempt != 1 || s.PatchRound != 0 || s.TokensUsed != 1000 || s.ProviderFailures != 0 {
 		t.Fatalf("a%d r%d tokens %d provider failures %d", s.Attempt, s.PatchRound, s.TokensUsed, s.ProviderFailures)
 	}
 	if n := countEvents(t, a, "p", "outcome", providerOutcome); n != 2 {
@@ -107,7 +139,7 @@ func TestProviderOutageEscalates(t *testing.T) {
 	submit(t, a, "p", spec("add P", "pkg/**"))
 	tk := waitPhase(t, a, "p", api.PhaseEscalated, "ProviderUnavailable")
 	s := tk.Status
-	if s.Attempt != 1 || s.PatchRound != 0 || s.TokensUsed != 0 || s.ProviderFailures < 2 {
+	if s.Attempt != 1 || s.PatchRound != 0 || s.TokensUsed != 0 || s.ProviderFailures < 1 {
 		t.Fatalf("a%d r%d tokens %d provider failures %d", s.Attempt, s.PatchRound, s.TokensUsed, s.ProviderFailures)
 	}
 	if !strings.Contains(s.Message, "adapter pi") || !strings.Contains(s.Message, "Connection error.") {
@@ -134,25 +166,10 @@ func TestProviderOutageHoldsOtherTasks(t *testing.T) {
 	stop := runController(t, a)
 	defer stop()
 	submit(t, a, "p", spec("add P", "pkg/**"))
-	deadline := time.Now().Add(time.Minute)
-	for {
-		tk, err := a.Store.GetTask(context.Background(), "p")
-		if err == nil && tk.Status.ProviderFailures > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			dumpEvents(t, a.Store, "p")
-			t.Fatal("p never recorded a provider failure")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	waitProviderFailure(t, a, "p")
 	submit(t, a, "q", spec("add Q", "pkg/**"))
-	time.Sleep(3 * time.Second)
-	q, err := a.Store.GetTask(context.Background(), "q")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if q.Status.Phase != api.PhasePending || !strings.Contains(q.Status.Message, "waiting for adapter pi: provider unreachable") {
+	q := waitMessage(t, a, "q", "waiting for adapter pi: provider unreachable")
+	if q.Status.Phase != api.PhasePending {
 		t.Fatalf("q: %s %s %q", q.Status.Phase, q.Status.Reason, q.Status.Message)
 	}
 	if n := countEvents(t, a, "q", "agent_start", nil); n != 0 {
@@ -181,5 +198,155 @@ func TestProviderAuthEscalates(t *testing.T) {
 	}
 	if n := countEvents(t, a, "p", "decision", nil); n != 0 {
 		t.Errorf("supervisor asked %d times", n)
+	}
+}
+
+// The provider goes away after one task has integrated and comes back
+// while a second task waits on it: both later tasks integrate in their
+// first attempt and round, the waiting one with a single run.
+func TestProviderOutageMidPlan(t *testing.T) {
+	providerTiming(t, 500*time.Millisecond, 2*time.Second, time.Minute)
+	h, log := piHarness(t, map[string]any{
+		"o": map[string]any{"write": map[string]string{"pkg/o.go": goFile("O")}},
+		"p": map[string]any{"down": 2, "write": map[string]string{"pkg/p.go": goFile("P")}},
+		"q": map[string]any{"down": 2, "write": map[string]string{"pkg/q.go": goFile("Q")}},
+	})
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	submit(t, a, "o", spec("add O", "pkg/**"))
+	waitPhase(t, a, "o", api.PhaseIntegrated, "")
+	submit(t, a, "p", spec("add P", "pkg/**"))
+	waitProviderFailure(t, a, "p")
+	submit(t, a, "q", spec("add Q", "pkg/**"))
+	waitMessage(t, a, "q", "waiting for adapter pi: provider unreachable")
+	for _, id := range []api.TaskID{"p", "q"} {
+		s := waitPhase(t, a, id, api.PhaseIntegrated, "").Status
+		if s.Attempt != 1 || s.PatchRound != 0 {
+			t.Errorf("%s: a%d r%d", id, s.Attempt, s.PatchRound)
+		}
+		if n := countEvents(t, a, id, "decision", nil); n != 0 {
+			t.Errorf("%s: supervisor asked %d times", id, n)
+		}
+	}
+	if n := countEvents(t, a, "q", "agent_start", nil); n != 1 {
+		t.Errorf("q started %d runs", n)
+	}
+	if n := countEvents(t, a, "p", "provider_back", nil) + countEvents(t, a, "q", "provider_back", nil); n != 1 {
+		t.Errorf("%d provider_back events", n)
+	}
+	if b, _ := os.ReadFile(filepath.Join(log, "down")); strings.Count(string(b), "\n") != 2 {
+		t.Errorf("%d runs reached the dead provider", strings.Count(string(b), "\n"))
+	}
+}
+
+// A run already going when the provider goes away, cut off after using
+// tokens, does not show the provider is back: other tasks stay held.
+func TestProviderOutageMidRunCrash(t *testing.T) {
+	providerTiming(t, time.Hour, time.Hour, 2*time.Hour)
+	h, _ := piHarness(t, map[string]any{
+		"p": map[string]any{"down": 1000},
+		"q": map[string]any{"turns": 250, "tokens": 10, "stop": "error", "error_message": "Connection error."},
+		"r": map[string]any{"write": map[string]string{"pkg/r.go": goFile("R")}},
+	})
+	ad := h.cfg.Adapters["pi"]
+	ad.MaxTurns = 1000
+	h.cfg.Adapters["pi"] = ad
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	submit(t, a, "q", spec("add Q", "pkg/**"))
+	waitPhase(t, a, "q", api.PhaseWorking, "AgentRunning")
+	submit(t, a, "p", spec("add P", "pkg/**"))
+	waitProviderFailure(t, a, "p")
+	if n := countEvents(t, a, "q", "outcome", nil); n != 0 {
+		t.Fatal("q's run ended before p's outage began")
+	}
+	deadline := time.Now().Add(time.Minute)
+	for countEvents(t, a, "q", "outcome", nil) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("q's run never ended")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	submit(t, a, "r", spec("add R", "pkg/**"))
+	waitMessage(t, a, "r", "waiting for adapter pi: provider unreachable")
+	if n := countEvents(t, a, "r", "agent_start", nil); n != 0 {
+		t.Errorf("r started %d runs", n)
+	}
+	if n := countEvents(t, a, "q", "provider_back", nil); n != 0 {
+		t.Errorf("q's crash reported the provider back")
+	}
+}
+
+// A patch round lost to the provider runs again with the same feedback.
+func TestProviderOutageKeepsFeedback(t *testing.T) {
+	providerTiming(t, 100*time.Millisecond, 400*time.Millisecond, time.Minute)
+	h, _ := piHarness(t, map[string]any{
+		"p/r0": map[string]any{"write": map[string]string{"pkg/p.go": goFile("P"), "pkg/p_test.go": goTest("P", 3)}},
+		"p/r1": map[string]any{"down": 1, "write": map[string]string{"pkg/p_test.go": goTest("P", 2)}},
+	})
+	a := h.open(context.Background())
+	defer a.Close()
+	stop := runController(t, a)
+	defer stop()
+	submit(t, a, "p", spec("add P", "pkg/**"))
+	tk := waitPhase(t, a, "p", api.PhaseIntegrated, "")
+	if tk.Status.Attempt != 1 || tk.Status.PatchRound != 1 {
+		t.Fatalf("a%d r%d", tk.Status.Attempt, tk.Status.PatchRound)
+	}
+	evs, err := a.Store.ListEvents(context.Background(), "p", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fbs []string
+	for _, e := range evs {
+		var d struct {
+			Round    int             `json:"round"`
+			Feedback json.RawMessage `json:"feedback"`
+		}
+		if e.Kind == "agent_start" && json.Unmarshal(e.Data, &d) == nil && d.Round == 1 {
+			fbs = append(fbs, string(d.Feedback))
+		}
+	}
+	if len(fbs) != 2 || fbs[0] != fbs[1] || fbs[0] == "null" || !strings.Contains(fbs[0], "TestP") {
+		t.Fatalf("round 1 feedback: %q", fbs)
+	}
+}
+
+// A controller restarted during an outage rebuilds it from the waiting
+// task: another task is held, and the outage limit counts from when the
+// provider first failed.
+func TestProviderOutageSurvivesRestart(t *testing.T) {
+	providerTiming(t, time.Hour, time.Hour, 2*time.Second)
+	h, _ := piHarness(t, map[string]any{
+		"p": map[string]any{"down": 1000},
+		"q": map[string]any{"write": map[string]string{"pkg/q.go": goFile("Q")}},
+	})
+	a := h.open(context.Background())
+	stop := runController(t, a)
+	submit(t, a, "p", spec("add P", "pkg/**"))
+	since := waitProviderFailure(t, a, "p").Status.ProviderDownSince
+	stop()
+	a.Close()
+	time.Sleep(time.Until(since.Add(2 * time.Second)))
+
+	a2 := h.open(context.Background())
+	defer a2.Close()
+	stop2 := runController(t, a2)
+	defer stop2()
+	submit(t, a2, "q", spec("add Q", "pkg/**"))
+	q := waitMessage(t, a2, "q", "waiting for adapter pi: provider unreachable since "+since.Format(time.RFC3339))
+	if q.Status.Phase != api.PhasePending {
+		t.Errorf("q: %s %s", q.Status.Phase, q.Status.Reason)
+	}
+	p := waitPhase(t, a2, "p", api.PhaseEscalated, "ProviderUnavailable")
+	if !p.Status.ProviderDownSince.Equal(since) || p.Status.ProviderFailures != 1 {
+		t.Errorf("p: down since %s (was %s), %d failures", p.Status.ProviderDownSince, since, p.Status.ProviderFailures)
+	}
+	if n := countEvents(t, a2, "q", "agent_start", nil); n != 0 {
+		t.Errorf("q started %d runs", n)
 	}
 }

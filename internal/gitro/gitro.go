@@ -4,7 +4,7 @@
 // The tool registry and gate engine use it (RFC §2: "Tools may run read-only
 // git through exec"). Every call uses Gas City's hermetic environment
 // (GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL=/dev/null, discovery variables
-// scrubbed), GIT_OPTIONAL_LOCKS=0, and the same hook/gc suppression as
+// scrubbed), GIT_OPTIONAL_LOCKS=0, and the same hook/fsmonitor/gc suppression as
 // internal/worktree. Materialize is the one helper that writes files, and it
 // writes only into a caller-owned directory through a temporary index;
 // EditTree adds tree objects, never refs.
@@ -41,7 +41,7 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("git %s: exit %d: %s", strings.Join(e.Args, " "), e.ExitCode, strings.TrimSpace(e.Stderr))
 }
 
-var baseArgs = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "core.hooksPath=/dev/null"}
+var baseArgs = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}
 
 // Env returns the environment for read-only git calls, plus extra entries.
 func Env(extra ...string) []string {

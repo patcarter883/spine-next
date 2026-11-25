@@ -21,9 +21,9 @@ func (e *GitError) Error() string {
 }
 
 // gitBaseArgs disable behaviours Spine must not trigger implicitly: automatic
-// gc/maintenance (§6.2 rule 5) and repository hooks, which could run
-// arbitrary code inside a supervised operation.
-var gitBaseArgs = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "core.hooksPath=/dev/null"}
+// gc/maintenance (§6.2 rule 5), and repository hooks and core.fsmonitor,
+// which could run arbitrary code inside a supervised operation.
+var gitBaseArgs = []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}
 
 func (m *Manager) gitEnv(extra []string) []string {
 	env := gcgit.SanitizedEnv()

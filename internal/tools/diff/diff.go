@@ -135,7 +135,7 @@ func (NonEmpty) Run(ctx context.Context, inv tools.Invocation) (tools.Result, er
 type Scope struct{}
 
 func (Scope) Spec() tools.Spec {
-	return tools.Spec{Name: "diff.scope", Version: "1", Determinism: tools.Pure, ReadOnly: true, UsesBase: true,
+	return tools.Spec{Name: "diff.scope", Version: "2", Determinism: tools.Pure, ReadOnly: true, UsesBase: true,
 		InputSchema: json.RawMessage(`{"type":"object","required":["scope"],"additionalProperties":false,
 			"properties":{"scope":{"type":"array","items":{"type":"string","minLength":1}},
 			"deny":{"type":"array","items":{"type":"string","minLength":1}}}}`)}
@@ -160,6 +160,9 @@ func (Scope) Run(ctx context.Context, inv tools.Invocation) (tools.Result, error
 		switch {
 		case InScope(a.Deny, p):
 			res.Diagnostics = append(res.Diagnostics, diag(tools.Error, "diff.scope", "DeniedPath", p, "change to a denied path: "+p))
+		case strings.HasPrefix(p, harnessDir) && !harnessInScope(a.Scope, p):
+			res.Diagnostics = append(res.Diagnostics, diag(tools.Error, "diff.scope", "DeniedPath", p,
+				"change to "+harnessDir+", which is protected unless the task scope names it explicitly: "+p))
 		case !InScope(a.Scope, p):
 			res.Diagnostics = append(res.Diagnostics, diag(tools.Error, "diff.scope", "OutOfScope", p, "change outside task scope: "+p))
 		}
@@ -175,6 +178,17 @@ func (Scope) Run(ctx context.Context, inv tools.Invocation) (tools.Result, error
 	}
 	res.Metrics = map[string]float64{"paths_checked": float64(len(cs))}
 	return res, nil
+}
+
+const harnessDir = ".spine/"
+
+func harnessInScope(scope []string, p string) bool {
+	for _, g := range scope {
+		if strings.HasPrefix(strings.TrimPrefix(g, "./"), harnessDir) && MatchGlob(g, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // - diff.applycheck -

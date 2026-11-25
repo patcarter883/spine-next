@@ -582,6 +582,8 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 				}
 			case "compaction_start":
 				g.emit(Event{Kind: "compaction", Title: "compaction started", Detail: ev.Reason})
+			case "extension_ui_request":
+				g.cancelDialog(rec)
 			case "agent_settled":
 				g.tools = map[string]piTool{}
 				if g.continuation != "" && reason == "" {
@@ -646,6 +648,23 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 			}
 		}
 	}
+}
+
+// piDialogs are the extension UI methods Pi blocks on until answered.
+var piDialogs = map[string]bool{"select": true, "confirm": true, "input": true, "editor": true}
+
+// cancelDialog dismisses an extension dialog, which no one is there to answer.
+func (g *piGuard) cancelDialog(rec piRecord) {
+	var ui struct {
+		Method string `json:"method"`
+		Title  string `json:"title"`
+	}
+	json.Unmarshal(rec.raw, &ui)
+	if !piDialogs[ui.Method] {
+		return
+	}
+	g.emit(Event{Kind: "guard", Title: "dialog cancelled", Detail: trunc(ui.Method+": "+ui.Title, 200)})
+	g.conn.send(map[string]any{"type": "extension_ui_response", "id": rec.ID, "cancelled": true})
 }
 
 func turnsSteer(p Prompt, left int) string {

@@ -32,6 +32,7 @@ type Step struct {
 	ErrorMessage string            `json:"error_message"`
 	RetryFail    bool              `json:"retry_fail"`
 	Tokens       int64             `json:"tokens"` // per assistant message
+	UI           string            `json:"ui"`     // extension_ui_request method sent first; a dialog waits for its answer
 	Then         *Step             `json:"then"`   // continuation prompt
 }
 
@@ -40,6 +41,7 @@ var (
 	out     = bufio.NewWriter(os.Stdout)
 	aborted atomic.Bool
 	abortCh = make(chan struct{}, 1)
+	uiCh    = make(chan string, 1)
 	tokens  atomic.Int64
 	cwd, _  = os.Getwd()
 	logDir  = os.Getenv("FAKE_PI_LOG")
@@ -112,6 +114,13 @@ func run(s Step) {
 		<-abortCh
 		emit(map[string]any{"type": "agent_settled", "aborted": true})
 		return
+	}
+	if s.UI != "" {
+		emit(map[string]any{"type": "extension_ui_request", "id": "ui-1", "method": s.UI, "title": "Proceed?"})
+		if s.UI != "notify" {
+			for id := ""; id != "ui-1"; id = <-uiCh {
+			}
+		}
 	}
 	finish := func(stop, text, errMsg string) {
 		emit(map[string]any{"type": "message_end", "message": assistant(stop, text, s.Tokens, errMsg)})
@@ -270,6 +279,9 @@ func main() {
 			default:
 			}
 			respond(c.ID, "abort", nil)
+		case "extension_ui_response":
+			logf("ui_responses", sc.Text())
+			uiCh <- c.ID
 		case "get_session_stats":
 			respond(c.ID, "get_session_stats", map[string]any{"tokens": map[string]any{"total": tokens.Load()}, "cost": float64(tokens.Load()) / 1e6})
 		default:

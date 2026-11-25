@@ -40,6 +40,8 @@ func TestAcceptRefusesWhatCannotApply(t *testing.T) {
 		"empty hint":    escalated(&api.Proposal{Kind: api.ProposeHint}),
 		"no new scope":  escalated(&api.Proposal{Kind: api.ProposeScope, Scope: []string{"pkg/**"}}, "pkg/**"),
 		"whole repo":    escalated(&api.Proposal{Kind: api.ProposeScope, Scope: []string{"lib/**"}}),
+		"harness":       escalated(&api.Proposal{Kind: api.ProposeScope, Scope: []string{"lib/**", ".spine/gates/**"}}, "pkg/**"),
+		"./harness":     escalated(&api.Proposal{Kind: api.ProposeScope, Scope: []string{"./.spine/gates.yaml"}}, "pkg/**"),
 		"unknown kind":  escalated(&api.Proposal{Kind: "rewrite"}),
 	} {
 		if c, err := Accept(tk, "pat"); err == nil {

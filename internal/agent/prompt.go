@@ -273,7 +273,7 @@ func indent(s string) string { return strings.ReplaceAll(s, "\n", "\n  ") }
 func DescribeGate(g api.GateRef) string {
 	desc := map[string]string{
 		"ts.parse":        "every changed file parses",
-		"diff.scope":      "only in-scope paths change",
+		"diff.scope":      "only in-scope paths change, and nothing under `.spine/` unless the scope names it",
 		"diff.nonempty":   "the change is not empty",
 		"ts.api_contract": "no exported API is removed or changed, and new imports resolve",
 		"go.build":        "`go build ./...` succeeds",

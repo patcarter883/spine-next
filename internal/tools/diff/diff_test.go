@@ -117,6 +117,66 @@ func TestScope(t *testing.T) {
 	}
 }
 
+func harnessChange(t *testing.T, change func(dir string)) fixture {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "main")
+	write(t, dir, "src/a.go", "package src\n")
+	write(t, dir, ".spine/gates.yaml", "gates: {}\n")
+	write(t, dir, ".spine/gates/pest.sh", "exit 1\n")
+	write(t, dir, ".spine/x", "keep\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "base")
+	base := git(t, dir, "rev-parse", "HEAD")
+	git(t, dir, "checkout", "-qb", "task")
+	change(dir)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "work")
+	return fixture{repo: dir, base: base, commit: git(t, dir, "rev-parse", "HEAD"), tree: git(t, dir, "rev-parse", "HEAD^{tree}")}
+}
+
+func TestScopeProtectsHarness(t *testing.T) {
+	reg := registry()
+	ctx := context.Background()
+	edit := func(rel, content string) func(string) {
+		return func(dir string) { write(t, dir, rel, content) }
+	}
+	cases := []struct {
+		name, args string
+		change     func(string)
+		denied     []string
+	}{
+		{"unscoped gate script", `{"scope":["**"]}`, edit(".spine/gates/pest.sh", "exit 0\n"), []string{".spine/gates/pest.sh"}},
+		{"unscoped gates.yaml", `{"scope":["**"]}`, edit(".spine/gates.yaml", "gates: {x: 1}\n"), []string{".spine/gates.yaml"}},
+		{"yaml glob", `{"scope":["**/*.yaml"]}`, edit(".spine/gates.yaml", "gates: {x: 1}\n"), []string{".spine/gates.yaml"}},
+		{"rename out", `{"scope":["**"]}`, func(dir string) { git(t, dir, "mv", ".spine/x", "y") }, []string{".spine/x"}},
+		{"survey scope", `{"scope":[".spine/modules.yaml",".spine/context.md"]}`, func(dir string) {
+			write(t, dir, ".spine/modules.yaml", "version: 1\n")
+			write(t, dir, ".spine/context.md", "notes\n")
+		}, nil},
+		{"explicit gates", `{"scope":["src/**","./.spine/gates/**"]}`, edit(".spine/gates/pest.sh", "exit 0\n"), nil},
+		{"ordinary", `{"scope":["**"]}`, edit("src/a.go", "package src\n\nfunc A() {}\n"), nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := harnessChange(t, c.change)
+			r, err := reg.Invoke(ctx, "diff.scope", f.inv(c.args))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var denied []string
+			for _, d := range r.Diagnostics {
+				if d.Code != "DeniedPath" {
+					t.Fatalf("unexpected diagnostic: %+v", d)
+				}
+				denied = append(denied, d.File)
+			}
+			if strings.Join(denied, ",") != strings.Join(c.denied, ",") || (r.ExitCode != 0) != (len(c.denied) > 0) {
+				t.Fatalf("want denied %v, have %+v", c.denied, r)
+			}
+		})
+	}
+}
+
 func TestApplyCheckAndPreflight(t *testing.T) {
 	f := setup(t)
 	reg := registry()

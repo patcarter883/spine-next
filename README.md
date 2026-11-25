@@ -351,7 +351,7 @@ The M3 A/B comparison of the LLM and rule supervisors on the corpus has not been
 | Package | What it does |
 |---|---|
 | `internal/tools` | The ToolRegistry (RFC §3.3). It validates args against each tool's JSON Schema, canonicalizes them, and keys the cache on content: tree OID, plus merge-base and base trees for base-dependent tools, plus an environment key for hermetic tools. It also bounds concurrency, enforces timeouts and caps results. Results are cached in memory or in SQLite (`tool_cache`). |
-| `internal/tools/diff` | `diff.stats`, `diff.nonempty`, `diff.scope` (`**` globs, deny list, both sides of a rename), `diff.applycheck` (temporary index) and `git.preflight` (`merge-tree --write-tree`). |
+| `internal/tools/diff` | `diff.stats`, `diff.nonempty`, `diff.scope` (`**` globs, deny list, both sides of a rename; `.spine/` is denied unless a scope entry starting with `.spine/` names the path), `diff.applycheck` (temporary index) and `git.preflight` (`merge-tree --write-tree`). |
 | `internal/tools/build` | `cmd.run` with the `go-build`, `gotest-json`, `pytest-junit`, `eslint-json`, `tsc`, `ruff-json`, `php-lint` and `regex` parsers, plus `go.build`, `go.vet` and `go.test`. See the `cmd.run` behaviour list below. |
 | `internal/tools/ast` | `ts.parse`, `ts.symbols` and `ts.api_contract`. Tree-sitter grammars cover Go, Python, TypeScript/TSX/JS and PHP; queries live in `queries/*.scm`. Go symbols come from `go/parser`. The import check covers Go, Python and TypeScript. |
 | `internal/gate` | The gate engine (RFC §5.4). Gates come from `.spine/gates.yaml` **at the base commit** and run in order, stopping at the first failure. Trees are materialized only on a cache miss. Verdicts are baseline-relative; see the rules below. |

@@ -109,22 +109,26 @@ func TestPiToolTimeoutRecovers(t *testing.T) {
 }
 
 func TestPiCancelsExtensionDialog(t *testing.T) {
-	e := setup(t, map[string]map[string]any{"*": {"ui": "confirm"}})
-	out, evs, err := e.runPi(t, func(a *Adapter, _ *RunRequest) { a.StallTimeout = 3 * time.Second })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Reason != api.OutcomeCompleted {
-		t.Fatalf("%+v", out)
-	}
-	resp, _ := os.ReadFile(filepath.Join(e.log, "ui_responses"))
-	if !strings.Contains(string(resp), `"cancelled":true`) || !strings.Contains(string(resp), `"id":"ui-1"`) {
-		t.Fatalf("response %q", resp)
-	}
-	if !slices.ContainsFunc(evs, func(ev Event) bool {
-		return ev.Kind == "guard" && ev.Title == "dialog cancelled" && ev.Detail == "confirm: Proceed?"
-	}) {
-		t.Fatalf("no guard event: %+v", evs)
+	for _, step := range []string{"ui", "pre_ui"} {
+		t.Run(step, func(t *testing.T) {
+			e := setup(t, map[string]map[string]any{"*": {step: "confirm"}})
+			out, evs, err := e.runPi(t, func(a *Adapter, _ *RunRequest) { a.StallTimeout = 3 * time.Second })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.Reason != api.OutcomeCompleted {
+				t.Fatalf("%+v", out)
+			}
+			resp, _ := os.ReadFile(filepath.Join(e.log, "ui_responses"))
+			if !strings.Contains(string(resp), `"cancelled":true`) || !strings.Contains(string(resp), `"id":"ui-1"`) {
+				t.Fatalf("response %q", resp)
+			}
+			if !slices.ContainsFunc(evs, func(ev Event) bool {
+				return ev.Kind == "guard" && ev.Title == "dialog cancelled" && ev.Detail == "confirm: Proceed?"
+			}) {
+				t.Fatalf("no guard event: %+v", evs)
+			}
+		})
 	}
 }
 

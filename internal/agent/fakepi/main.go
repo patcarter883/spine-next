@@ -32,8 +32,9 @@ type Step struct {
 	ErrorMessage string            `json:"error_message"`
 	RetryFail    bool              `json:"retry_fail"`
 	Tokens       int64             `json:"tokens"` // per assistant message
-	UI           string            `json:"ui"`     // extension_ui_request method sent first; a dialog waits for its answer
-	Then         *Step             `json:"then"`   // continuation prompt
+	UI           string            `json:"ui"`
+	PreUI        string            `json:"pre_ui"`
+	Then         *Step             `json:"then"` // continuation prompt
 }
 
 var (
@@ -107,6 +108,17 @@ func assistant(stop, text string, n int64, errMsg string) map[string]any {
 	return m
 }
 
+func ui(method string) {
+	if method == "" {
+		return
+	}
+	emit(map[string]any{"type": "extension_ui_request", "id": "ui-1", "method": method, "title": "Proceed?", "message": "All messages will be lost."})
+	if method != "notify" {
+		for id := ""; id != "ui-1"; id = <-uiCh {
+		}
+	}
+}
+
 func run(s Step) {
 	aborted.Store(false)
 	emit(map[string]any{"type": "agent_start"})
@@ -115,13 +127,7 @@ func run(s Step) {
 		emit(map[string]any{"type": "agent_settled", "aborted": true})
 		return
 	}
-	if s.UI != "" {
-		emit(map[string]any{"type": "extension_ui_request", "id": "ui-1", "method": s.UI, "title": "Proceed?"})
-		if s.UI != "notify" {
-			for id := ""; id != "ui-1"; id = <-uiCh {
-			}
-		}
-	}
+	ui(s.UI)
 	finish := func(stop, text, errMsg string) {
 		emit(map[string]any{"type": "message_end", "message": assistant(stop, text, s.Tokens, errMsg)})
 		emit(map[string]any{"type": "agent_end", "willRetry": false})
@@ -266,8 +272,11 @@ func main() {
 			} else {
 				cur = Step{}
 			}
-			respond(c.ID, "prompt", map[string]any{"disposition": "started"})
-			go run(cur)
+			go func(id string, s Step) {
+				ui(s.PreUI)
+				respond(id, "prompt", map[string]any{"disposition": "started"})
+				run(s)
+			}(c.ID, cur)
 		case "steer":
 			logf("steers", c.Message)
 			respond(c.ID, "steer", map[string]any{"disposition": "queued"})

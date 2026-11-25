@@ -80,6 +80,9 @@ func (c *piConn) serve(r io.Reader) {
 			var rec piRecord
 			if json.Unmarshal(line, &rec) == nil && rec.Type != "" {
 				rec.raw = line
+				if _, _, ok := piDialog(rec); ok {
+					c.send(map[string]any{"type": "extension_ui_response", "id": rec.ID, "cancelled": true})
+				}
 				if rec.Type == "response" && rec.ID != "" {
 					c.mu.Lock()
 					ch := c.pending[rec.ID]
@@ -583,7 +586,9 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 			case "compaction_start":
 				g.emit(Event{Kind: "compaction", Title: "compaction started", Detail: ev.Reason})
 			case "extension_ui_request":
-				g.cancelDialog(rec)
+				if method, title, ok := piDialog(rec); ok {
+					g.emit(Event{Kind: "guard", Title: "dialog cancelled", Detail: trunc(method+": "+title, 200)})
+				}
 			case "agent_settled":
 				g.tools = map[string]piTool{}
 				if g.continuation != "" && reason == "" {
@@ -650,21 +655,18 @@ func (g *piGuard) loop(ctx context.Context, kill context.CancelFunc) (api.Outcom
 	}
 }
 
-// piDialogs are the extension UI methods Pi blocks on until answered.
 var piDialogs = map[string]bool{"select": true, "confirm": true, "input": true, "editor": true}
 
-// cancelDialog dismisses an extension dialog, which no one is there to answer.
-func (g *piGuard) cancelDialog(rec piRecord) {
+func piDialog(rec piRecord) (method, title string, ok bool) {
+	if rec.Type != "extension_ui_request" {
+		return "", "", false
+	}
 	var ui struct {
 		Method string `json:"method"`
 		Title  string `json:"title"`
 	}
 	json.Unmarshal(rec.raw, &ui)
-	if !piDialogs[ui.Method] {
-		return
-	}
-	g.emit(Event{Kind: "guard", Title: "dialog cancelled", Detail: trunc(ui.Method+": "+ui.Title, 200)})
-	g.conn.send(map[string]any{"type": "extension_ui_response", "id": rec.ID, "cancelled": true})
+	return ui.Method, ui.Title, piDialogs[ui.Method]
 }
 
 func turnsSteer(p Prompt, left int) string {

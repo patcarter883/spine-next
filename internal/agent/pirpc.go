@@ -384,6 +384,7 @@ func (r *Runner) runPi(ctx context.Context, req RunRequest) (api.Outcome, error)
 				msg = strings.TrimSpace(msg + "\n" + g.retryErr)
 			}
 			out.Message = trunc(strings.TrimSpace(fmt.Sprintf("pi stopped with %q: %s", last.StopReason, msg)), 2000)
+			out.Provider = ProviderFailure(msg, out.TokensUsed)
 		}
 	}
 	return out, nil

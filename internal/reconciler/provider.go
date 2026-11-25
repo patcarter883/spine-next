@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/patcarter883/spine-next/internal/agent"
 	"github.com/patcarter883/spine-next/internal/api"
 )
 
@@ -86,11 +87,14 @@ func (c *Controller) noteProvider(name string, id api.TaskID, out api.Outcome, r
 	c.mu.Lock()
 	o := c.outages[name]
 	if !retryableProvider(out.Provider) {
-		if o != nil && (o.probe == id || o.probe == "") {
+		if o != nil && providerAnswered(out) {
 			delete(c.outages, name)
 			c.mu.Unlock()
 			c.event(id, "provider_back", map[string]any{"adapter": name, "down_since": o.since})
 			return
+		}
+		if o != nil && o.probe == id {
+			o.probe = ""
 		}
 		c.mu.Unlock()
 		return
@@ -137,6 +141,20 @@ func (c *Controller) restoreOutage(t *api.Task) {
 	if t.Status.ProviderRetryAt.After(o.until) {
 		o.until = t.Status.ProviderRetryAt
 	}
+}
+
+// providerAnswered reports whether a run shows its provider answering:
+// it finished, or it used tokens and stopped on an error that is not a
+// provider's. A cancelled or aborted run, or one cut off mid-run by the
+// provider, shows nothing.
+func providerAnswered(out api.Outcome) bool {
+	switch out.Reason {
+	case api.OutcomeCompleted, api.OutcomeBudgetExceeded:
+		return true
+	case api.OutcomeCrashed:
+		return out.TokensUsed > 0 && agent.ProviderFailure(out.Message, 0) == ""
+	}
+	return false
 }
 
 func retryableProvider(p api.ProviderFailure) bool {

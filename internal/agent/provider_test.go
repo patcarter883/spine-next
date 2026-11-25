@@ -19,6 +19,7 @@ func TestProviderFailure(t *testing.T) {
 		{"getaddrinfo ENOTFOUND gpu-box.lan", 0, api.ProviderUnreachable},
 		{"connect ETIMEDOUT 10.0.0.5:443", 0, api.ProviderUnreachable},
 		{"TypeError: fetch failed", 0, api.ProviderUnreachable},
+		{"Request timed out.", 0, api.ProviderUnreachable},
 		{"socket hang up", 0, api.ProviderUnreachable},
 		{"503 Service Unavailable", 0, api.ProviderUnreachable},
 		{"502 Bad Gateway", 0, api.ProviderUnreachable},
@@ -32,6 +33,7 @@ func TestProviderFailure(t *testing.T) {
 		{"No API key found for openai", 0, api.ProviderAuth},
 
 		{"Connection error.\nprovider retries exhausted: Connection error.", 1200, ""},
+		{"Request timed out.", 300, ""},
 		{"Model local/qwen not found", 0, ""},
 		{"Unknown option --bogus", 0, ""},
 		{"500 from vLLM", 0, ""},

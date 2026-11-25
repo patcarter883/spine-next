@@ -12,7 +12,7 @@ var providerPatterns = []struct {
 }{
 	{api.ProviderAuth, regexp.MustCompile(`(?i)\b40[13]\b|unauthori[sz]ed|forbidden|authentication|invalid[ _-]?(x-)?api[ _-]?key|incorrect api key|no api key`)},
 	{api.ProviderRateLimit, regexp.MustCompile(`(?i)\b429\b|rate[ _-]?limit|too many requests`)},
-	{api.ProviderUnreachable, regexp.MustCompile(`(?i)connection error|connection refused|econnrefused|econnreset|enotfound|etimedout|eai_again|fetch failed|socket hang up|\b50[234]\b|\b529\b|bad gateway|service unavailable|gateway timeout|overloaded`)},
+	{api.ProviderUnreachable, regexp.MustCompile(`(?i)connection error|connection refused|econnrefused|econnreset|enotfound|etimedout|request timed out|eai_again|fetch failed|socket hang up|\b50[234]\b|\b529\b|bad gateway|service unavailable|gateway timeout|overloaded`)},
 }
 
 // ProviderFailure classifies the error a run stopped with when it never

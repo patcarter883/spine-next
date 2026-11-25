@@ -44,7 +44,11 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 	}
 	b := t.Spec.Budget.WithDefaults()
 	if !t.Status.StartedAt.IsZero() && time.Since(t.Status.StartedAt) > b.MaxWallClock {
-		return c.finish(ctx, &t, api.PhaseFailed, "WallClockExceeded", fmt.Sprintf("ran longer than %s", b.MaxWallClock))
+		msg := fmt.Sprintf("ran longer than %s", b.MaxWallClock)
+		if out := t.Status.LastOutcome; out != nil && retryableProvider(out.Provider) && t.Status.ProviderFailures > 0 {
+			msg += fmt.Sprintf("; adapter %s: provider %s since %s", c.adapterName(&t), describeProvider(out.Provider), t.Status.ProviderDownSince.Format(time.RFC3339))
+		}
+		return c.finish(ctx, &t, api.PhaseFailed, "WallClockExceeded", msg)
 	}
 	if b.MaxTokens > 0 && t.Status.TokensUsed > b.MaxTokens {
 		return c.finish(ctx, &t, api.PhaseFailed, "TokenBudgetExceeded", fmt.Sprintf("%d tokens used, budget %d", t.Status.TokensUsed, b.MaxTokens))

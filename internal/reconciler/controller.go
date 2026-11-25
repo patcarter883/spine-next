@@ -334,6 +334,7 @@ func (c *Controller) resumeOrphans(ctx context.Context) error {
 				s.LastOutcome = &api.Outcome{Attempt: op.Attempt, Round: op.Round, Reason: api.OutcomeCrashed,
 					Message: "the controller stopped while the agent was running"}
 				s.Op, s.NextFeedback = nil, nil
+				s.ProviderFailures, s.ProviderDownSince, s.ProviderRetryAt = 0, time.Time{}, time.Time{}
 				s.SetCondition(api.CondWorkerSucceeded, false, "ControllerRestarted", "", api.SourceAgent)
 				return nil
 			})

@@ -28,6 +28,7 @@ func (c *Controller) restart(ctx context.Context, t *api.Task, spec api.Spec, re
 		s.Phase, s.Reason, s.Message = api.PhasePending, reason, ""
 		s.PatchRound, s.Worktree, s.Op, s.NextFeedback, s.ResumeFrom, s.Proposal = 0, nil, nil, nil, nil, nil
 		s.StartedAt = time.Now().UTC()
+		s.ProviderFailures, s.ProviderDownSince, s.ProviderRetryAt = 0, time.Time{}, time.Time{}
 		if fn != nil {
 			fn(s)
 		}
@@ -50,6 +51,7 @@ func (c *Controller) resumeInPlace(ctx context.Context, t *api.Task, reason stri
 		s.Phase, s.Reason, s.Message, s.Op, s.Proposal = api.PhaseProvisioned, reason, "", nil, nil
 		s.PatchRound++
 		s.NextFeedback = fb
+		s.ProviderFailures, s.ProviderDownSince, s.ProviderRetryAt = 0, time.Time{}, time.Time{}
 		if fn != nil {
 			fn(s)
 		}

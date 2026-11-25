@@ -132,8 +132,12 @@ func observationJSON(o Observation, suggestion api.Decision) ([]byte, error) {
 	}
 	out["hints_from_people"] = people
 	if o.Outcome != nil {
-		out["last_agent_run"] = map[string]any{"result": o.Outcome.Reason, "stop_reason": o.Outcome.StopReason,
+		run := map[string]any{"result": o.Outcome.Reason, "stop_reason": o.Outcome.StopReason,
 			"final_message": trunc(o.Outcome.Message, 1000)}
+		if o.Outcome.Provider != "" {
+			run["provider_failure"] = o.Outcome.Provider
+		}
+		out["last_agent_run"] = run
 	}
 	var hist []round
 	for _, h := range o.History {

@@ -90,6 +90,7 @@ type Controller struct {
 	// they last asked; new tasks do not take a slot while one is waiting.
 	resuming map[api.TaskID]time.Time
 	merges   mergeQueue
+	outages  map[string]*outage // by adapter name
 	// staged holds approve/retry/cancel commands until the task's next
 	// reconcile applies them, so commands are serialized with reconciles by
 	// the per-key queue (a command never races a reconcile of its task).
@@ -131,7 +132,7 @@ func New(d Deps) *Controller {
 		d.Config.Resync = 15 * time.Second
 	}
 	return &Controller{Deps: d, q: newQueue(), inflight: map[api.TaskID]*flight{}, slots: map[api.TaskID]bool{},
-		staged: map[api.TaskID][]inbox.Entry{}, seen: map[string]bool{}, fatal: make(chan error, 1)}
+		outages: map[string]*outage{}, staged: map[api.TaskID][]inbox.Entry{}, seen: map[string]bool{}, fatal: make(chan error, 1)}
 }
 
 // Run recovers, then reconciles until ctx ends. On return every operation
@@ -320,6 +321,9 @@ func (c *Controller) resumeOrphans(ctx context.Context) error {
 			// its lease: release it now.
 			c.teardown(ctx, t.ID, t.Status.Attempt)
 		}
+		if !t.Status.Phase.Terminal() {
+			c.restoreOutage(&t)
+		}
 		op := t.Status.Op
 		if op == nil {
 			continue
@@ -329,7 +333,7 @@ func (c *Controller) resumeOrphans(ctx context.Context) error {
 			_, err = c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceAgent, func(s *api.Status) error {
 				s.LastOutcome = &api.Outcome{Attempt: op.Attempt, Round: op.Round, Reason: api.OutcomeCrashed,
 					Message: "the controller stopped while the agent was running"}
-				s.Op = nil
+				s.Op, s.NextFeedback = nil, nil
 				s.SetCondition(api.CondWorkerSucceeded, false, "ControllerRestarted", "", api.SourceAgent)
 				return nil
 			})

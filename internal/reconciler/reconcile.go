@@ -68,6 +68,9 @@ func (c *Controller) Reconcile(ctx context.Context, id api.TaskID) (Result, erro
 		if out == nil || out.Attempt != t.Status.Attempt || out.Round != t.Status.PatchRound {
 			return c.startAgent(ctx, &t, b, t.Status.PatchRound, t.Status.NextFeedback)
 		}
+		if out.Provider != "" {
+			return c.providerFailed(ctx, &t, b, out)
+		}
 		snap, err := c.snapshot(ctx, &t)
 		if err != nil {
 			return Result{}, err
@@ -171,6 +174,17 @@ func (c *Controller) provision(ctx context.Context, t *api.Task, b api.Budget) (
 			})
 		}
 		return Result{RequeueAfter: 3 * time.Second}, nil
+	}
+	if msg, wait, held := c.providerHeld(c.adapterName(t), t.ID, false); held {
+		if t.Status.Message != msg {
+			if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
+				s.Message = msg
+				return nil
+			}); err != nil {
+				return Result{}, err
+			}
+		}
+		return Result{RequeueAfter: wait}, nil
 	}
 	if !c.acquireNewSlot(t.ID) {
 		return Result{RequeueAfter: 2 * time.Second}, nil
@@ -279,6 +293,18 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 	if !ok {
 		return c.finish(ctx, t, api.PhaseFailed, "UnknownAdapter", t.Spec.Adapter)
 	}
+	if msg, wait, held := c.providerHeld(a.Name, t.ID, true); held {
+		if t.Status.Phase != api.PhaseWorking || t.Status.Reason != "WaitingForProvider" || t.Status.Message != msg || t.Status.PatchRound != round {
+			if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
+				s.Phase, s.Reason, s.Message = api.PhaseWorking, "WaitingForProvider", msg
+				s.PatchRound, s.NextFeedback = round, fb
+				return nil
+			}); err != nil {
+				return Result{}, err
+			}
+		}
+		return Result{RequeueAfter: wait}, nil
+	}
 	lease, err := c.Store.GetLease(ctx, string(t.ID), t.Status.Attempt)
 	if err != nil {
 		return Result{}, fmt.Errorf("lease %s/a%d: %w", t.ID, t.Status.Attempt, err)
@@ -302,7 +328,7 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 	if _, err := c.Store.UpdateStatus(ctx, t.ID, 0, api.SourceController, func(s *api.Status) error {
 		s.Phase, s.Reason, s.Message = api.PhaseWorking, "AgentRunning", ""
 		s.PatchRound = round
-		s.NextFeedback = nil
+		s.NextFeedback = fb
 		s.Hints = nil
 		s.Op = &api.Op{Kind: "agent", Attempt: attempt, Round: round, StartedAt: time.Now().UTC()}
 		return nil
@@ -333,7 +359,7 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 	ctxInfo := c.addContext(ctx, t, a, lease.BaseOID, &prompt)
 	c.event(t.ID, "agent_start", map[string]any{"attempt": attempt, "round": round, "adapter": a.Name, "feedback": fb,
 		"protocol": a.Protocol, "context": ctxInfo})
-	id := t.ID
+	id, name := t.ID, a.Name
 	c.start(id, "agent", func(opCtx context.Context) {
 		lastEvent := time.Time{}
 		msgs := &messageBuffer{flush: func(text string) { c.event(id, "agent", agent.Event{Kind: "message", Detail: text}) }}
@@ -357,18 +383,29 @@ func (c *Controller) startAgent(ctx context.Context, t *api.Task, b api.Budget, 
 			out = api.Outcome{Attempt: attempt, Round: round, Reason: api.OutcomeCrashed, Message: err.Error()}
 		}
 		wctx := context.WithoutCancel(opCtx)
-		if _, err := c.Store.UpdateStatus(wctx, id, 0, api.SourceAgent, func(s *api.Status) error {
+		since := c.outageSince(name)
+		t2, err := c.Store.UpdateStatus(wctx, id, 0, api.SourceAgent, func(s *api.Status) error {
 			s.LastOutcome = &out
 			s.TokensUsed += out.TokensUsed
 			if s.Op != nil && s.Op.Kind == "agent" {
 				s.Op = nil
 			}
+			if !retryableProvider(out.Provider) {
+				s.NextFeedback = nil
+			}
+			providerOutcome(s, &out, since)
 			s.SetCondition(api.CondWorkerSucceeded, out.Reason == api.OutcomeCompleted, string(out.Reason), "", api.SourceAgent)
 			return nil
-		}); err != nil {
+		})
+		if err != nil {
 			c.Logf("record outcome %s: %v", id, err)
 		}
+		c.noteProvider(name, id, out, t2.Status.ProviderRetryAt)
 		c.event(id, "outcome", out)
+		if retryableProvider(out.Provider) && err == nil {
+			c.event(id, "provider_unavailable", map[string]any{"adapter": name, "provider": out.Provider, "failures": t2.Status.ProviderFailures,
+				"down_since": t2.Status.ProviderDownSince, "retry_at": t2.Status.ProviderRetryAt})
+		}
 	})
 	return Result{}, nil
 }

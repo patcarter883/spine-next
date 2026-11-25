@@ -35,6 +35,7 @@ type Step struct {
 	UI           string            `json:"ui"`
 	PreUI        string            `json:"pre_ui"`
 	Then         *Step             `json:"then"` // continuation prompt
+	Down         int               `json:"down"` // fail this many runs (counted in FAKE_PI_LOG/down) on an unreachable provider
 }
 
 var (
@@ -132,6 +133,15 @@ func run(s Step) {
 		emit(map[string]any{"type": "message_end", "message": assistant(stop, text, s.Tokens, errMsg)})
 		emit(map[string]any{"type": "agent_end", "willRetry": false})
 		emit(map[string]any{"type": "agent_settled", "aborted": stop == "aborted"})
+	}
+	if b, _ := os.ReadFile(filepath.Join(logDir, "down")); s.Down > strings.Count(string(b), "\n") {
+		logf("down", "down")
+		emit(map[string]any{"type": "turn_start"})
+		emit(map[string]any{"type": "auto_retry_end", "success": false, "attempt": 3, "finalError": "Connection error."})
+		emit(map[string]any{"type": "message_end", "message": assistant("error", "", 0, "Connection error.")})
+		emit(map[string]any{"type": "agent_end", "willRetry": false})
+		emit(map[string]any{"type": "agent_settled", "aborted": false})
+		return
 	}
 	turns := s.Turns
 	if turns == 0 && len(s.Write) > 0 {

@@ -183,6 +183,15 @@ const (
 	OutcomeRefused        OutcomeReason = "Refused"
 )
 
+// ProviderFailure classifies a run lost to the model provider, not the task.
+type ProviderFailure string
+
+const (
+	ProviderUnreachable ProviderFailure = "unreachable" // down, refusing connections or over capacity
+	ProviderRateLimit   ProviderFailure = "rate_limit"
+	ProviderAuth        ProviderFailure = "auth"
+)
+
 // Outcome is the result of one agent run.
 type Outcome struct {
 	Attempt    int           `json:"attempt"`
@@ -197,6 +206,9 @@ type Outcome struct {
 	WrappedUp  bool          `json:"wrapped_up,omitempty"` // told to finish before a limit cut the run off
 	Duration   time.Duration `json:"duration_ns"`
 	Message    string        `json:"message,omitempty"` // bounded
+	// Provider is set when the run never reached the model: it stopped on
+	// a provider error before using any tokens.
+	Provider ProviderFailure `json:"provider,omitempty"`
 }
 
 // GateSummary is the stored digest of one gate evaluation.
@@ -276,6 +288,12 @@ type Status struct {
 	Plan *Plan `json:"plan,omitempty"`
 	// Proposal is the supervisor's suggestion for an escalated task.
 	Proposal *Proposal `json:"proposal,omitempty"`
+	// ProviderFailures counts the runs in a row lost to an unavailable
+	// provider, since ProviderDownSince; the same round runs again at
+	// ProviderRetryAt.
+	ProviderFailures  int       `json:"provider_failures,omitempty"`
+	ProviderDownSince time.Time `json:"provider_down_since,omitempty"`
+	ProviderRetryAt   time.Time `json:"provider_retry_at,omitempty"`
 }
 
 // Hint is a person's note for the next repair round.

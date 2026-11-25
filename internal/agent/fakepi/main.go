@@ -32,7 +32,9 @@ type Step struct {
 	ErrorMessage string            `json:"error_message"`
 	RetryFail    bool              `json:"retry_fail"`
 	Tokens       int64             `json:"tokens"` // per assistant message
-	Then         *Step             `json:"then"`   // continuation prompt
+	UI           string            `json:"ui"`
+	PreUI        string            `json:"pre_ui"`
+	Then         *Step             `json:"then"` // continuation prompt
 }
 
 var (
@@ -40,6 +42,7 @@ var (
 	out     = bufio.NewWriter(os.Stdout)
 	aborted atomic.Bool
 	abortCh = make(chan struct{}, 1)
+	uiCh    = make(chan string, 1)
 	tokens  atomic.Int64
 	cwd, _  = os.Getwd()
 	logDir  = os.Getenv("FAKE_PI_LOG")
@@ -105,6 +108,17 @@ func assistant(stop, text string, n int64, errMsg string) map[string]any {
 	return m
 }
 
+func ui(method string) {
+	if method == "" {
+		return
+	}
+	emit(map[string]any{"type": "extension_ui_request", "id": "ui-1", "method": method, "title": "Proceed?", "message": "All messages will be lost."})
+	if method != "notify" {
+		for id := ""; id != "ui-1"; id = <-uiCh {
+		}
+	}
+}
+
 func run(s Step) {
 	aborted.Store(false)
 	emit(map[string]any{"type": "agent_start"})
@@ -113,6 +127,7 @@ func run(s Step) {
 		emit(map[string]any{"type": "agent_settled", "aborted": true})
 		return
 	}
+	ui(s.UI)
 	finish := func(stop, text, errMsg string) {
 		emit(map[string]any{"type": "message_end", "message": assistant(stop, text, s.Tokens, errMsg)})
 		emit(map[string]any{"type": "agent_end", "willRetry": false})
@@ -257,8 +272,11 @@ func main() {
 			} else {
 				cur = Step{}
 			}
-			respond(c.ID, "prompt", map[string]any{"disposition": "started"})
-			go run(cur)
+			go func(id string, s Step) {
+				ui(s.PreUI)
+				respond(id, "prompt", map[string]any{"disposition": "started"})
+				run(s)
+			}(c.ID, cur)
 		case "steer":
 			logf("steers", c.Message)
 			respond(c.ID, "steer", map[string]any{"disposition": "queued"})
@@ -270,6 +288,9 @@ func main() {
 			default:
 			}
 			respond(c.ID, "abort", nil)
+		case "extension_ui_response":
+			logf("ui_responses", sc.Text())
+			uiCh <- c.ID
 		case "get_session_stats":
 			respond(c.ID, "get_session_stats", map[string]any{"tokens": map[string]any{"total": tokens.Load()}, "cost": float64(tokens.Load()) / 1e6})
 		default:

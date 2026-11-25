@@ -3,6 +3,7 @@ package inbox
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/patcarter883/spine-next/internal/api"
 )
@@ -31,6 +32,9 @@ func Accept(t api.Task, by string) (Command, error) {
 		spec.Scope = slices.Clone(spec.Scope)
 		added := 0
 		for _, g := range p.Scope {
+			if strings.HasPrefix(strings.TrimPrefix(g, "./"), ".spine/") {
+				return Command{}, fmt.Errorf("%s: the proposal would unlock %s, which holds the gates; edit the spec by hand if that is intended", t.ID, g)
+			}
 			if g != "" && !slices.Contains(spec.Scope, g) {
 				spec.Scope = append(spec.Scope, g)
 				added++

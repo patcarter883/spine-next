@@ -275,6 +275,49 @@ func TestHookFailureDiscardsLease(t *testing.T) {
 	f.healthy()
 }
 
+func TestFsmonitorInWorktreeConfigNeverRuns(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	l, err := f.m.Create(ctx, "fm1", 1, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "ran")
+	hook := filepath.Join(t.TempDir(), "fsmonitor.sh")
+	write(t, hook, "#!/bin/sh\necho ran >> "+marker+"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(t, l.Path, "config", "core.fsmonitor", hook)
+	run(t, l.Path, "status", "--porcelain")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("fixture's fsmonitor hook did not run under plain git: %v", err)
+	}
+	os.Remove(marker)
+	common := run(t, l.Path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	write(t, filepath.Join(common, "hooks", "post-checkout"), "#!/bin/sh\necho ran >> "+marker+"\n")
+	if err := os.Chmod(filepath.Join(common, "hooks", "post-checkout"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, filepath.Join(l.Path, "a.txt"), "two\n")
+	if _, err := f.m.Snapshot(ctx, l, "post-worker"); err != nil {
+		t.Fatal(err)
+	}
+	l2, err := f.m.Create(ctx, "fm2", 1, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []*Lease{l, l2} {
+		if err := f.m.Teardown(ctx, x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("spine's git ran a planted core.fsmonitor or post-checkout hook: %v", err)
+	}
+}
+
 func TestTeardownRefusesLiveProcess(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)

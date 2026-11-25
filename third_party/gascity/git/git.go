@@ -523,6 +523,12 @@ func (g *Git) run(args ...string) (string, error) {
 // long as the descendant lives.
 const gitWaitDelay = 2 * time.Second
 
+var spineConfigEnv = []string{
+	"GIT_CONFIG_COUNT=2",
+	"GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null",
+	"GIT_CONFIG_KEY_1=core.fsmonitor", "GIT_CONFIG_VALUE_1=false",
+}
+
 // runCtx executes a git command with a context for cancellation/timeout.
 // A failure on a ctx that is done also wraps ctx.Err(), so callers can tell a
 // missed deadline from an ordinary non-zero exit.
@@ -533,7 +539,9 @@ func (g *Git) runCtx(ctx context.Context, args ...string) (string, error) {
 		cmd.WaitDelay = gitWaitDelay
 	}
 	// Build clean env: inherit everything except git-specific vars.
-	cmd.Env = sanitizeGitEnv(os.Environ())
+	// SPINE PATCH (see third_party/gascity/UPSTREAM.md, patch 2): never run
+	// repository hooks or a core.fsmonitor program from the shared config.
+	cmd.Env = append(sanitizeGitEnv(os.Environ()), spineConfigEnv...)
 	// SPINE PATCH (see third_party/gascity/UPSTREAM.md, patch 1): run git as a
 	// process-group leader and cancel the whole group, so a hook, credential
 	// helper or ssh child cannot outlive a cancelled or timed-out call.
